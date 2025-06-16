@@ -1,26 +1,4 @@
-# [CVPR2025] 4D LangSplat: 4D Language Gaussian Splatting via Multimodal Large Language Models
-[Wanhua Li*](https://li-wanhua.github.io/), [Renping Zhou*](https://github.com/zrporz), [Jiawei Zhou](https://joezhouai.com/), [Yingwei Song](https://github.com/wrencanfly), [Johannes Herter](https://www.linkedin.com/in/johannes-herter-48a549155/), [Minghan Qin](https://github.com/minghanqin), [Gao Huang†](https://www.gaohuang.net/), [Hanspeter Pfister†](https://seas.harvard.edu/person/hanspeter-pfister) \
-(* indicates equal contribution, † means Co-corresponding author) \
-| [Project page](https://4d-langsplat.github.io) | [Full Paper](https://arxiv.org/abs/2503.10437) | [Video](https://youtu.be/L2OzQ91eRG4) |\
-| Datasets Annotations | [Google Drive](https://drive.google.com/drive/folders/1C-ciHn38vVd47TMkx2-93EUpI0z4ZdZW?usp=sharing) | [BaiduWangpan](https://pan.baidu.com/s/1ZMOk0UFQ39WJ7TtTXy9gkA?pwd=g9rg)\
-| Pretrained Model | [Google Drive](https://drive.google.com/drive/folders/1-G8I5cJCD66fjpvejUzF9QPRJU_GNxj0?usp=sharing) | [BaiduWangpan](https://pan.baidu.com/s/1TmBW1ZjZfjLQTGxpDXZzlg?pwd=3kmw)\
-| Pregenerated Point Clouds by COLMAP | [Google Drive](https://drive.google.com/drive/folders/1_JOObfpXrCq3v_NYKwDt6vRHIbb0oVek?usp=sharing) | [BaiduWangpan](https://pan.baidu.com/s/15jDvS-zSW7pfdvzdwP32mQ?pwd=9y2u)
-<img src="./assets/teaser.png"> 
-This repository contains the official implementation of the paper "4D LangSplat: 4D Language Gaussian Splatting via Multimodal Large Language Models" (CVPR 2025).
-## BibTeX
-```
-@inproceedings{li20254dlangsplat4dlanguage,
-    title={4D LangSplat: 4D Language Gaussian Splatting via Multimodal Large Language Models}, 
-    author={Wanhua Li and Renping Zhou and Jiawei Zhou and Yingwei Song and Johannes Herter and Minghan Qin and Gao Huang and Hanspeter Pfister},
-    booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-    year={2025}
-}
-```
-## Cloning the Repository
-The repository contains submodules, thus please check it out with
-```bash
-git clone git@github.com:zrporz/4DLangSplat.git --recursive
-```
+# 4D LangSplatSurgery: 4D Language Gaussian Splatting via Multimodal Large Language Models on Surgery Data
 
 ## Setup
 4D LangSplat uses the following software versions:
@@ -140,13 +118,20 @@ bash scripts/train_eval.sh
 ```
 This will train the 4D LangSplat field and perform evaluation.
 
-## TODO list
-- [x] release the code of the 4d-langsplat-rasterization
-- [x] release the code of the 4d-langsplat-tracking-anything-with-deva
-- [x] release the code of the evaluation
-- [x] release the code of the autoencoder
-- [x] release the code of preprocessing
-- [x] release the code of training
-- [x] release the the pretrained model
-- [ ] release the preprocessed dataset
-- [x] update the arxiv link
+## Reference
+
+This repository contains the official forked implementation of the paper "4D LangSplat: 4D Language Gaussian Splatting via Multimodal Large Language Models" (CVPR 2025).
+## BibTeX
+```
+@inproceedings{li20254dlangsplat4dlanguage,
+    title={4D LangSplat: 4D Language Gaussian Splatting via Multimodal Large Language Models}, 
+    author={Wanhua Li and Renping Zhou and Jiawei Zhou and Yingwei Song and Johannes Herter and Minghan Qin and Gao Huang and Hanspeter Pfister},
+    booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+    year={2025}
+}
+```
+
+| [Project page](https://4d-langsplat.github.io) | [Full Paper](https://arxiv.org/abs/2503.10437) | [Video](https://youtu.be/L2OzQ91eRG4) |\
+| Datasets Annotations | [Google Drive](https://drive.google.com/drive/folders/1C-ciHn38vVd47TMkx2-93EUpI0z4ZdZW?usp=sharing) | [BaiduWangpan](https://pan.baidu.com/s/1ZMOk0UFQ39WJ7TtTXy9gkA?pwd=g9rg)\
+| Pretrained Model | [Google Drive](https://drive.google.com/drive/folders/1-G8I5cJCD66fjpvejUzF9QPRJU_GNxj0?usp=sharing) | [BaiduWangpan](https://pan.baidu.com/s/1TmBW1ZjZfjLQTGxpDXZzlg?pwd=3kmw)\
+| Pregenerated Point Clouds by COLMAP | [Google Drive](https://drive.google.com/drive/folders/1_JOObfpXrCq3v_NYKwDt6vRHIbb0oVek?usp=sharing) | [BaiduWangpan](https://pan.baidu.com/s/15jDvS-zSW7pfdvzdwP32mQ?pwd=9y2u)
