@@ -1,13 +1,14 @@
 from sklearn.cluster import HDBSCAN
 import torch
 import argparse
-import os
 import numpy as np
 import torchvision
 from pathlib import Path
 import logging
 import mmcv
 import rerun as rr
+import random
+import colorsys
 
 from scene.cameras import Camera
 from utils.params_utils import merge_hparams
@@ -16,8 +17,7 @@ from cluster_utils import store_palette, clusters_to_rgb
 from scene import GaussianModel, Scene
 from gaussian_renderer import render as gs_render
 from utils.sh_utils import RGB2SH
-import random
-# from utils.render_utils import get_state_at_time
+from autoencoder.model import Autoencoder
 
 
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +50,7 @@ def init_params():
     parser.add_argument("--nonpy", type=int, default=0)
     parser.add_argument("--load_stage", type=str, default="fine-lang")
     parser.add_argument("--num_views", type=int, default=5)
+    parser.add_argument("--autoencoder_ckpt_path", type=str, default=None)
 
     # load config file if specified
     args = parser.parse_args()
@@ -192,19 +193,170 @@ def render_and_save_all(gaussians: GaussianModel, pipe: PipelineParams, scene: S
             img = render(cam, timestep, gaussians, pipe, scene, args, dataset)
             torchvision.utils.save_image(img, cam_dir / f"timestep_{j:02d}.png")
 
-def visualize_cluster_pointcloud(gaussians: GaussianModel, clusters: np.ndarray, scene: Scene):
+
+        
+def bhattacharyya_coefficient(mu1, Sigma1, mu2, Sigma2):
+    mu1, mu2 = np.asarray(mu1), np.asarray(mu2)
+    Sigma1, Sigma2 = np.asarray(Sigma1), np.asarray(Sigma2)
+
+    # Average covariance
+    Sigma = 0.5 * (Sigma1 + Sigma2)
+
+    # Cholesky factorization for stability
+    L = np.linalg.cholesky(Sigma)
+    # Solve for (mu2 - mu1) without explicit inverse
+    diff = mu2 - mu1
+    sol = np.linalg.solve(L, diff)
+    sol = np.linalg.solve(L.T, sol)
+    term1 = 0.125 * np.dot(diff, sol)  # (1/8) Δμᵀ Σ⁻¹ Δμ
+
+    # log-determinants via Cholesky
+    logdet_Sigma = 2.0 * np.sum(np.log(np.diag(L)))
+    logdet_Sigma1 = 2.0 * np.sum(np.log(np.diag(np.linalg.cholesky(Sigma1))))
+    logdet_Sigma2 = 2.0 * np.sum(np.log(np.diag(np.linalg.cholesky(Sigma2))))
+    term2 = 0.5 * (logdet_Sigma - 0.5 * (logdet_Sigma1 + logdet_Sigma2))
+
+    DB = term1 + term2
+    return np.exp(-DB)  # Bhattacharyya coefficient
+
+def cluster_clip_features(gaussians: GaussianModel, clusters: np.ndarray, scene: Scene, args: argparse.Namespace):
+    # init ae
+    ae = Autoencoder(
+        encoder_hidden_dims=[256, 128, 64, 32, 3],
+        decoder_hidden_dims=[16, 32, 64, 128, 256, 512],
+        feature_dim=512,
+    ).to("cuda")
+    ae.load_state_dict(torch.load(args.autoencoder_ckpt_path, map_location='cuda'))
+    ae.eval() 
+
+    # get mean latent lfs
+    n_nodes = len(np.unique(clusters)) - 1
+    lfs_centroids = torch.stack([gaussians.get_language_feature[clusters == i].mean(dim=0) for i in range(n_nodes)])
+
+    # decode lfs
+    with torch.no_grad():
+        decoded_lfs = ae.decode(lfs_centroids)
+
+    return decoded_lfs.detach().cpu().numpy()
+
+def timestep_cluster_means(positions_through_time, clusters):
+    """Returns np(timesteps, clusters, 3) cluster mean positions"""
+    cluster_ids = np.unique(clusters)
+    cluster_ids = cluster_ids[cluster_ids != -1]
+
+    means = np.empty((len(positions_through_time), len(cluster_ids), 3))
+    for t in range(len(positions_through_time)):
+        for i in range(len(cluster_ids)):
+            means[t, i] = positions_through_time[t][clusters == cluster_ids[i]].mean(0)
+
+    return means
+    
+def timestep_graph(positions, clusters):
+    n_nodes = len(np.unique(clusters)) - 1
+    means = np.stack([positions[clusters == i].mean(0) for i in range(n_nodes)])
+    covs = np.stack([np.cov(positions[clusters == i].T) for i in range(n_nodes)])
+
+    distances = np.empty((n_nodes, n_nodes))
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            distances[i, j] = bhattacharyya_coefficient(means[i], covs[i], means[j], covs[j])
+
+    A = np.where(distances >= 0.05, distances, 0)
+    return A
+
+def visualize_rerun(gaussians: GaussianModel, clusters: np.ndarray, timesteps: np.ndarray, pos_through_time: np.ndarray, cluster_pos_through_time: np.ndarray, graphs_through_time: np.ndarray):
     rr.init("clusters", spawn=True)
-    cluster_idx = clusters != -1
-    cols = gaussians._features_dc.detach().cpu().numpy()[cluster_idx] * 255
-    labels = [str(i) for i in clusters[cluster_idx]]
-    for t in np.linspace(0, 1, 20):
-        pos = positions_at_timestep(gaussians, t, scene)[cluster_idx]
-        pc = rr.Points3D(
-            positions=pos,
-            colors=cols,
-            labels=labels,
-        )
-        rr.log("clusters", pc)
+
+    cluster_ids = np.unique(clusters)
+    cluster_ids = cluster_ids[cluster_ids != -1]
+
+    cols = gaussians._features_dc.detach().cpu().numpy() * 255
+
+    for t in range(len(timesteps)):
+        # Set timeline for this timestep
+        rr.set_time_seconds("timestep", timesteps[t])
+        
+        pos = pos_through_time[t]
+        cluster_means = cluster_pos_through_time[t]
+        A = graphs_through_time[t]
+
+        # Visualize individual cluster points
+        for c in cluster_ids:
+            pc = rr.Points3D(
+                positions=pos[clusters == c],
+                colors=cols[clusters == c],
+                radii=0.02,  # Regular point size
+            )
+            rr.log(f"clusters/points/cluster_{c}", pc)
+
+        # Visualize cluster means with distinctive appearance
+        if cluster_means.shape[0] > 0:
+            # Use bright colors for means - cycle through distinct colors
+            mean_colors = []
+            for i in range(len(cluster_means)):
+                # Create distinctive colors for means (bright, saturated)
+                hue = (i * 360 / len(cluster_means)) % 360
+                # Convert HSV to RGB (bright and saturated)
+                rgb = colorsys.hsv_to_rgb(hue/360, 1.0, 1.0)
+                mean_colors.append([int(c * 255) for c in rgb])
+            
+            means_viz = rr.Points3D(
+                positions=cluster_means,
+                colors=mean_colors,
+                radii=0.2,  # Even larger mean points
+            )
+            rr.log("clusters/means", means_viz)
+
+        # Visualize graph edges with weights
+        if A.shape[0] > 0:
+            # Find all non-zero edges in the adjacency matrix
+            edge_indices = np.where(A > 0)
+            if len(edge_indices[0]) > 0:
+                edge_weights = A[edge_indices]
+                
+                # Normalize weights for visualization
+                if len(edge_weights) > 1:
+                    min_weight = edge_weights.min()
+                    max_weight = edge_weights.max()
+                    if max_weight > min_weight:
+                        normalized_weights = (edge_weights - min_weight) / (max_weight - min_weight)
+                    else:
+                        normalized_weights = np.ones_like(edge_weights)
+                else:
+                    normalized_weights = np.ones_like(edge_weights)
+                
+                # Create edge lines
+                edge_starts = []
+                edge_ends = []
+                edge_colors = []
+                edge_radii = []
+                
+                for idx, (i, j) in enumerate(zip(edge_indices[0], edge_indices[1])):
+                    if i < j:  # Avoid duplicate edges (since adjacency matrix is symmetric)
+                        start_pos = cluster_means[i]
+                        end_pos = cluster_means[j]
+                        weight = normalized_weights[idx]
+                        
+                        edge_starts.append(start_pos)
+                        edge_ends.append(end_pos)
+                        
+                        # Color based on weight: red for high weights, blue for low weights
+                        color_intensity = int(weight * 255)
+                        edge_colors.append([color_intensity, 0, 255 - color_intensity])
+                        
+                        # Thickness based on weight: thicker lines for higher weights
+                        thickness = 0.04 + weight * 0.16  # Range from 0.01 to 0.05 (doubled thickness)
+                        edge_radii.append(thickness)
+                
+                if edge_starts:
+                    # Log edges as line strips
+                    for idx, (start, end) in enumerate(zip(edge_starts, edge_ends)):
+                        edge_line = rr.LineStrips3D(
+                            strips=[[start, end]],
+                            colors=[edge_colors[idx]],
+                            radii=[edge_radii[idx]]
+                        )
+                        rr.log(f"clusters/edges/edge_{idx}", edge_line)
 
 def main():
     # determistic seeds
@@ -228,15 +380,33 @@ def main():
         load_stage=args.load_stage,
     )
 
-    # filter gaussians, cluster, filter clusters, set cluster colors
+    # gaussian filtering
     mask = (gaussians.get_opacity > 0.1).squeeze()
     filter_gaussians(gaussians, mask)
+
+    # cluster and filter
     clusters = cluster_gaussians(gaussians, timestep=0.0, scene=scene)
     filter_clusters(clusters, gaussians, scene)
     palette = set_cluster_colors(gaussians, clusters)
 
+    # cluster features
+    timesteps = np.linspace(0, 1, 20) 
+    clip_features = cluster_clip_features(gaussians, clusters, scene, args)
+    pos_through_time = np.stack([positions_at_timestep(gaussians, t, scene) for t in timesteps])
+    cluster_pos_through_time = timestep_cluster_means(pos_through_time, clusters)
+
+    # graph
+    graphs = np.stack([timestep_graph(pos_through_time[i], clusters) for i in range(len(timesteps))])
+
     # log clusters over time
-    visualize_cluster_pointcloud(gaussians, clusters, scene)
+    visualize_rerun(
+        gaussians=gaussians,
+        clusters=clusters,
+        timesteps=timesteps,
+        pos_through_time=pos_through_time,
+        cluster_pos_through_time=cluster_pos_through_time,
+        graphs_through_time=graphs,
+    )
 
     # render and save everything
     out = Path(args.model_path) / "graph"
@@ -244,6 +414,9 @@ def main():
     render_and_save_all(gaussians, pipe, scene, args, dataset, out)
     store_palette(palette, out / "cluster_palette.png")
     gaussians.save_ply(out / "clustered_gaussians.ply")
+    np.save(out / "cluster_clip_features.npy", clip_features)
+    np.save(out / "cluster_ids.npy", clusters)
+    np.save(out / "cluster_centroids_per_timestep.npy", cluster_pos_through_time)
 
 if __name__ == "__main__":
     main()
