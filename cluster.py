@@ -1,3 +1,5 @@
+from typing import List
+import open_clip
 from sklearn.cluster import HDBSCAN
 import torch
 import argparse
@@ -8,7 +10,6 @@ import logging
 import mmcv
 import rerun as rr
 import random
-import colorsys
 
 from scene.cameras import Camera
 from utils.params_utils import merge_hparams
@@ -18,6 +19,12 @@ from scene import GaussianModel, Scene
 from gaussian_renderer import render as gs_render
 from utils.sh_utils import RGB2SH
 from autoencoder.model import Autoencoder
+from rerun_utils import (
+    log_cluster_pointcloud_through_time,
+    log_graph_structure_through_time,
+    log_correspondences_static
+)
+from lerf_utils import relevancy_scores
 
 
 logging.basicConfig(level=logging.INFO)
@@ -219,8 +226,9 @@ def bhattacharyya_coefficient(mu1, Sigma1, mu2, Sigma2):
     DB = term1 + term2
     return np.exp(-DB)  # Bhattacharyya coefficient
 
-def cluster_clip_features(gaussians: GaussianModel, clusters: np.ndarray, args: argparse.Namespace):
-    # init ae
+def decode_lfs(lfs: torch.Tensor, args: argparse.Namespace) -> np.ndarray:
+    BATCH_SIZE = 1024
+
     ae = Autoencoder(
         encoder_hidden_dims=[256, 128, 64, 32, 3],
         decoder_hidden_dims=[16, 32, 64, 128, 256, 512],
@@ -229,6 +237,16 @@ def cluster_clip_features(gaussians: GaussianModel, clusters: np.ndarray, args: 
     ae.load_state_dict(torch.load(args.autoencoder_ckpt_path, map_location='cuda'))
     ae.eval() 
 
+    decoded_lfs = []
+    with torch.no_grad():
+        for i in range(0, lfs.shape[0], BATCH_SIZE):
+            batch = lfs[i:min(i+BATCH_SIZE, len(lfs))].to("cuda")
+            decoded_lfs.append(ae.decode(batch))
+    decoded_lfs = [i.detach().cpu().numpy() for i in decoded_lfs]
+    decoded_lfs = np.concatenate(decoded_lfs, axis=0)
+    return decoded_lfs
+
+def cluster_clip_features(gaussians: GaussianModel, clusters: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     # get average language feature weighted by opacity
     weighted_cluster_lfs = []
     n_nodes = len(np.unique(clusters)) - 1
@@ -243,11 +261,8 @@ def cluster_clip_features(gaussians: GaussianModel, clusters: np.ndarray, args: 
     
     lfs_weighted_centroids = torch.stack(weighted_cluster_lfs)
 
-    # decode lfs
-    with torch.no_grad():
-        decoded_lfs = ae.decode(lfs_weighted_centroids)
+    return decode_lfs(lfs_weighted_centroids, args)
 
-    return decoded_lfs.detach().cpu().numpy()
 
 def timestep_cluster_means(positions_through_time, clusters):
     """Returns np(timesteps, clusters, 3) cluster mean positions"""
@@ -274,101 +289,80 @@ def timestep_graph(positions, clusters):
     A = np.where(distances >= 0.05, distances, 0)
     return A
 
-def visualize_rerun(gaussians: GaussianModel, clusters: np.ndarray, timesteps: np.ndarray, pos_through_time: np.ndarray, cluster_pos_through_time: np.ndarray, graphs_through_time: np.ndarray, rerun_file: Path):
-    rr.init("clusters")
-    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
-    rr.save(rerun_file)
+def cosine_similarities(lfs: np.ndarray, texts: List[str]):
+    """Computes cosine similarities between a set of
+    text prompts and given language features.
 
-    cluster_ids = np.unique(clusters)
-    cluster_ids = cluster_ids[cluster_ids != -1]
+    Args:
+        lfs (np.ndarray): The language features to compute correspondences for. (N, dim_clip)
+        texts (List[str]): The text prompts to compute correspondences for.
 
-    cols = gaussians._features_dc.detach().cpu().numpy() * 255
+    Returns:
+        np.ndarray: The cosine similarities between the text prompts and the language features. (n_texts, N)
+    """
+    # load clip model
+    model, _, _ = open_clip.create_model_and_transforms('ViT-B-16', pretrained='laion2b_s34b_b88k')
+    model.to("cuda")
+    model.eval()
+    tokenizer = open_clip.get_tokenizer('ViT-B-16')
 
-    for t in range(len(timesteps)):
-        # Set timeline for this timestep
-        rr.set_time_seconds("timestep", timesteps[t])
-        
-        pos = pos_through_time[t]
-        cluster_means = cluster_pos_through_time[t]
-        A = graphs_through_time[t]
+    # compute normalized text feats
+    with torch.no_grad():
+        tok_phrases = tokenizer(texts).to("cuda")
+        text = model.encode_text(tok_phrases)
+    text_feats = text.float().cpu().numpy()
+    text_feats = text_feats / np.linalg.norm(text_feats, axis=-1, keepdims=True)
 
-        # Visualize individual cluster points
-        for c in cluster_ids:
-            pc = rr.Points3D(
-                positions=pos[clusters == c],
-                colors=cols[clusters == c],
-                radii=0.02,  # Regular point size
-            )
-            rr.log(f"clusters/points/cluster_{c}", pc)
+    # compute normalized rendered feats
+    rendered_feats = lfs / np.linalg.norm(lfs, axis=-1, keepdims=True)
 
-        # Visualize cluster means with distinctive appearance
-        if cluster_means.shape[0] > 0:
-            # Use bright colors for means - cycle through distinct colors
-            mean_colors = []
-            for i in range(len(cluster_means)):
-                # Create distinctive colors for means (bright, saturated)
-                hue = (i * 360 / len(cluster_means)) % 360
-                # Convert HSV to RGB (bright and saturated)
-                rgb = colorsys.hsv_to_rgb(hue/360, 1.0, 1.0)
-                mean_colors.append([int(c * 255) for c in rgb])
-            
-            means_viz = rr.Points3D(
-                positions=cluster_means,
-                colors=mean_colors,
-                radii=0.2,  # Even larger mean points
-            )
-            rr.log("clusters/means", means_viz)
+    cos_sim = text_feats @ rendered_feats.T
+    return cos_sim
 
-        # Visualize graph edges with weights
-        if A.shape[0] > 0:
-            # Find all non-zero edges in the adjacency matrix
-            edge_indices = np.where(A > 0)
-            if len(edge_indices[0]) > 0:
-                edge_weights = A[edge_indices]
-                
-                # Normalize weights for visualization
-                if len(edge_weights) > 1:
-                    min_weight = edge_weights.min()
-                    max_weight = edge_weights.max()
-                    if max_weight > min_weight:
-                        normalized_weights = (edge_weights - min_weight) / (max_weight - min_weight)
-                    else:
-                        normalized_weights = np.ones_like(edge_weights)
-                else:
-                    normalized_weights = np.ones_like(edge_weights)
-                
-                # Create edge lines
-                edge_starts = []
-                edge_ends = []
-                edge_colors = []
-                edge_radii = []
-                
-                for idx, (i, j) in enumerate(zip(edge_indices[0], edge_indices[1])):
-                    if i < j:  # Avoid duplicate edges (since adjacency matrix is symmetric)
-                        start_pos = cluster_means[i]
-                        end_pos = cluster_means[j]
-                        weight = normalized_weights[idx]
-                        
-                        edge_starts.append(start_pos)
-                        edge_ends.append(end_pos)
-                        
-                        # Color based on weight: red for high weights, blue for low weights
-                        color_intensity = int(weight * 255)
-                        edge_colors.append([color_intensity, 0, 255 - color_intensity])
-                        
-                        # Thickness based on weight: thicker lines for higher weights
-                        thickness = 0.04 + weight * 0.16  # Range from 0.01 to 0.05 (doubled thickness)
-                        edge_radii.append(thickness)
-                
-                if edge_starts:
-                    # Log edges as line strips
-                    for idx, (start, end) in enumerate(zip(edge_starts, edge_ends)):
-                        edge_line = rr.LineStrips3D(
-                            strips=[[start, end]],
-                            colors=[edge_colors[idx]],
-                            radii=[edge_radii[idx]]
-                        )
-                        rr.log(f"clusters/edges/edge_{idx}", edge_line)
+def lerf_relevancy_scores(lfs: np.ndarray, texts: List[str]):
+    """Computes cosine similarities between a set of
+    text prompts and given language features.
+
+    Args:
+        lfs (np.ndarray): The language features to compute correspondences for. (N, dim_clip)
+        texts (List[str]): The text prompts to compute correspondences for.
+
+    Returns:
+        np.ndarray: The cosine similarities between the text prompts and the language features. (n_texts, N)
+    """
+    neutral_corpus = [
+        "object",
+        "things",
+        "stuff",
+        "texture"
+    ]
+
+    # load clip model
+    model, _, _ = open_clip.create_model_and_transforms('ViT-B-16', pretrained='laion2b_s34b_b88k')
+    model.to("cuda")
+    model.eval()
+    tokenizer = open_clip.get_tokenizer('ViT-B-16')
+
+    # compute normalized text feats
+    with torch.no_grad():
+        tok_text = tokenizer(texts).to("cuda")
+        text = model.encode_text(tok_text)
+        tok_neutral = tokenizer(neutral_corpus).to("cuda")
+        neutral = model.encode_text(tok_neutral)
+    text_feats = text.float().cpu().numpy()
+    text_feats = text_feats / np.linalg.norm(text_feats, axis=-1, keepdims=True)
+    neutral_feats = neutral.float().cpu().numpy()
+    neutral_feats = neutral.float().cpu().numpy()
+
+    rendered_feats = lfs / np.linalg.norm(lfs, axis=-1, keepdims=True)
+
+    scores = relevancy_scores(
+        lang=rendered_feats,
+        query=text_feats,
+        canon=neutral_feats
+    )
+
+    return scores
 
 def main():
     # determistic seeds
@@ -410,18 +404,19 @@ def main():
     # graph
     graphs = np.stack([timestep_graph(pos_through_time[i], clusters) for i in range(len(timesteps))])
 
+    # query correspondences
+    QUERIES = [
+        "hand", "egg"
+    ]
+    gaussian_lfs = decode_lfs(gaussians.get_language_feature, args)
+    # guassian_cos_sim = cosine_similarities(gaussian_lfs, QUERIES)
+    guassian_lerf_sim = lerf_relevancy_scores(gaussian_lfs, QUERIES)
+    # cluster_cos_sim = cosine_similarities(clip_features, QUERIES)
+    cluster_lerf_sim = lerf_relevancy_scores(clip_features, QUERIES)
+
     # render and save everything
     out = Path(args.model_path) / "graph"
     out.mkdir(parents=True, exist_ok=True)
-    visualize_rerun(
-        gaussians=gaussians,
-        clusters=clusters,
-        timesteps=timesteps,
-        pos_through_time=pos_through_time,
-        cluster_pos_through_time=cluster_pos_through_time,
-        graphs_through_time=graphs,
-        rerun_file=out / "graph_visualization.rrd"
-    )
     render_and_save_all(gaussians, pipe, scene, args, dataset, out)
     store_palette(palette, out / "cluster_palette.png")
     gaussians.save_ply(out / "clustered_gaussians.ply")
@@ -429,6 +424,33 @@ def main():
     np.save(out / "cluster_ids.npy", clusters)
     np.save(out / "cluster_centroids_per_timestep.npy", cluster_pos_through_time)
     np.save(out / "adjacency_matrices_per_timestep.npy", graphs)
+
+    # visualize to rerun
+    rr.init("clusters")
+    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
+    rr.save(out / "graph_visualization.rrd")
+    rr.log("/", rr.Transform3D(scale=[1, 1, -1]), static=True)
+    log_cluster_pointcloud_through_time(
+        gaussians=gaussians,
+        clusters=clusters,
+        timesteps=timesteps,
+        pos_through_time=pos_through_time,
+        cluster_pos_through_time=cluster_pos_through_time,
+        text_queries=QUERIES,
+        cluster_correspondences=cluster_lerf_sim,
+    )
+    log_graph_structure_through_time(
+        cluster_pos_through_time=cluster_pos_through_time,
+        graphs_through_time=graphs,
+    )
+    log_correspondences_static(
+        positions=gaussians.get_xyz.detach().cpu().numpy(),
+        clusters=clusters,
+        text_queries=QUERIES,
+        correspondences=guassian_lerf_sim,
+        corr_min=0.0,
+        corr_max=1.0,
+    )
 
 if __name__ == "__main__":
     main()
