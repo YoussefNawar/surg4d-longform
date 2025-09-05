@@ -282,18 +282,19 @@ def cluster_clip_features(
     # get average language feature weighted by opacity
     weighted_cluster_lfs = []
     n_nodes = len(np.unique(clusters))
-    opacities = gaussians.get_opacity
-    lfs = gaussians.get_language_feature
+    opacities = gaussians.get_opacity.detach().cpu().numpy()
+    decoded_lfs = decode_lfs(gaussians.get_language_feature, args) # decode before aggregation, works slightly better but not much
     for cluster_id in range(n_nodes):
-        cluster_mask = torch.tensor(clusters == cluster_id).to("cuda")
+        cluster_mask = clusters == cluster_id
         cluster_opacities = opacities[cluster_mask]
-        cluster_lfs = lfs[cluster_mask]
-        cluster_lf = (cluster_lfs * cluster_opacities).sum(0) / cluster_opacities.sum()
+        cluster_lfs = decoded_lfs[cluster_mask]
+        cluster_lf = (cluster_lfs * cluster_opacities).sum(axis=0) / cluster_opacities.sum()
+        cluster_lf = cluster_lf / np.linalg.norm(cluster_lf)
         weighted_cluster_lfs.append(cluster_lf)
 
-    lfs_weighted_centroids = torch.stack(weighted_cluster_lfs)
+    lfs_weighted_centroids = np.stack(weighted_cluster_lfs)
 
-    return decode_lfs(lfs_weighted_centroids, args)
+    return lfs_weighted_centroids
 
 
 def properties_through_time(positions_through_time, clusters):
