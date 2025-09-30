@@ -2,7 +2,7 @@ cd autoencoder
 dataset_name=chickchicken_qwen
 dataset_path=../data/hypernerf/${dataset_name}
 feature_name=qwen_features
-latent_dim=32
+latent_dim=3
 echo "Training Qwen autoencoder (3584 -> ${latent_dim})"
 
 python train_qwen.py --dataset_path ${dataset_path} --model_name ${dataset_name}_qwen \
