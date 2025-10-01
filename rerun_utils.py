@@ -4,7 +4,8 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 
 def log_cluster_pointcloud_through_time(
-    gaussians,
+    gaussians_rgb,
+    gaussians_qwen,
     clusters: np.ndarray,
     timesteps: np.ndarray,
     pos_through_time: np.ndarray,
@@ -25,7 +26,8 @@ def log_cluster_pointcloud_through_time(
     """
     cluster_ids = np.unique(clusters)
 
-    cols = gaussians._features_dc.detach().cpu().numpy() * 255
+    cols = gaussians_rgb._features_dc.detach().cpu().numpy() * 255
+    lfs_qwen = np.clip(gaussians_qwen.get_language_feature.detach().cpu().numpy() * 10, a_min=0.0, a_max=1.0) * 255
 
     for i in range(len(timesteps)):
         rr.set_time("timestep", sequence=i)
@@ -39,13 +41,21 @@ def log_cluster_pointcloud_through_time(
                 colors=cols[clusters == c],
                 radii=0.02,
             )
-            rr.log(f"clusters/points/cluster_{c}", pc)
+            rr.log(f"clusters/points/cluster/{c}", pc)
+            qwen_pc = rr.Points3D(
+                positions=pos[clusters == c],
+                colors=lfs_qwen[clusters == c],
+                radii=0.02,
+            )
+            rr.log(f"clusters/points/qwen/{c}", qwen_pc)
 
         # Log cluster means
         mean_colors = np.stack([cols[clusters == c][0] for c in cluster_ids])
-        mean_labels = []
-        for c in cluster_ids:
-            mean_labels.append("\n".join([f"{text_queries[i]}\t\t{cluster_correspondences[i, c]:.2f}" for i in range(len(text_queries))]))
+        mean_labels = None
+        if text_queries is not None and cluster_correspondences is not None:
+            mean_labels = []
+            for c in cluster_ids:
+                mean_labels.append("\n".join([f"{text_queries[i]}\t\t{cluster_correspondences[i, c]:.2f}" for i in range(len(text_queries))]))
         means_viz = rr.Points3D(
             positions=cluster_means,
             colors=mean_colors,

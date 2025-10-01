@@ -148,13 +148,22 @@ def load_all_models(
             shuffle=False,
             load_stage=qwen_load_stage,
         )
-        logger.info(f"Loaded Qwen model from {qwen_model_path} at stage {qwen_load_stage}")
+        logger.info(
+            f"Loaded Qwen model from {qwen_model_path} at stage {qwen_load_stage}"
+        )
     except Exception as e:
         logger.warning(f"Failed to load Qwen model: {e}")
         gaussians_qwen = None
         scene_qwen = None
 
-    return gaussians_clip, scene_clip, gaussians_rgb, scene_rgb, gaussians_qwen, scene_qwen
+    return (
+        gaussians_clip,
+        scene_clip,
+        gaussians_rgb,
+        scene_rgb,
+        gaussians_qwen,
+        scene_qwen,
+    )
 
 
 def filter_gaussians(gaussians: GaussianModel, mask: torch.Tensor):
@@ -260,9 +269,7 @@ def set_cluster_colors(gaussians: GaussianModel, clusters: np.ndarray):
     colors = torch.zeros_like(gaussians._features_dc)  # outliers black
     cluster_colors, palette = clusters_to_rgb(clusters)
     sh_dc = RGB2SH(cluster_colors)  # (N,3)
-    colors[:, 0, :] = torch.tensor(
-        sh_dc, device=colors.device, dtype=colors.dtype
-    )
+    colors[:, 0, :] = torch.tensor(sh_dc, device=colors.device, dtype=colors.dtype)
     gaussians._features_dc.data = colors  # constant part becomes cluster color
     gaussians._features_rest.data = torch.zeros_like(
         gaussians._features_rest
@@ -371,6 +378,7 @@ def decode_clip(lfs: torch.Tensor, args: argparse.Namespace) -> np.ndarray:
     decoded_lfs = decoded_lfs / np.linalg.norm(decoded_lfs, axis=-1, keepdims=True)
     return decoded_lfs
 
+
 def decode_qwen(lfs: torch.Tensor, args: argparse.Namespace) -> np.ndarray:
     BATCH_SIZE = 1024
 
@@ -390,6 +398,7 @@ def decode_qwen(lfs: torch.Tensor, args: argparse.Namespace) -> np.ndarray:
     decoded_lfs = np.concatenate(decoded_lfs, axis=0)
     return decoded_lfs
 
+
 def cluster_clip_features(
     gaussians: GaussianModel, clusters: np.ndarray, args: argparse.Namespace
 ) -> np.ndarray:
@@ -397,12 +406,16 @@ def cluster_clip_features(
     weighted_cluster_lfs = []
     n_nodes = len(np.unique(clusters))
     opacities = gaussians.get_opacity.detach().cpu().numpy()
-    decoded_lfs = decode_clip(gaussians.get_language_feature, args) # decode before aggregation, works slightly better but not much
+    decoded_lfs = decode_clip(
+        gaussians.get_language_feature, args
+    )  # decode before aggregation, works slightly better but not much
     for cluster_id in range(n_nodes):
         cluster_mask = clusters == cluster_id
         cluster_opacities = opacities[cluster_mask]
         cluster_lfs = decoded_lfs[cluster_mask]
-        cluster_lf = (cluster_lfs * cluster_opacities).sum(axis=0) / cluster_opacities.sum()
+        cluster_lf = (cluster_lfs * cluster_opacities).sum(
+            axis=0
+        ) / cluster_opacities.sum()
         cluster_lf = cluster_lf / np.linalg.norm(cluster_lf)
         weighted_cluster_lfs.append(cluster_lf)
 
@@ -410,26 +423,39 @@ def cluster_clip_features(
 
     return lfs_weighted_centroids
 
-def cluster_qwen_features(qwen_g: GaussianModel, rgb_g: GaussianModel, clusters: np.ndarray, args: argparse.Namespace) -> np.ndarray:
+
+def cluster_qwen_features(
+    qwen_g: GaussianModel,
+    rgb_g: GaussianModel,
+    clusters: np.ndarray,
+    args: argparse.Namespace,
+) -> np.ndarray:
     """returns list of top cluster lfs (dynamic size)"""
     n_nodes = len(np.unique(clusters))
-    # opacities = rgb_g.get_opacity.detach().cpu().numpy()
+    opacities = rgb_g.get_opacity.detach().cpu().numpy().squeeze()
     lfs = qwen_g.get_language_feature.detach().cpu().numpy()
     top_cluster_lfs = {}
+    full_cluster_lfs = {}
     for cluster_id in range(n_nodes):
         cluster_mask = clusters == cluster_id
-        # cluster_opacities = opacities[cluster_mask]
+        cluster_opacities = opacities[cluster_mask]
         cluster_lfs = lfs[cluster_mask]
-        print("CLUSTER ID", cluster_id)
-        print("size", cluster_lfs.shape[0])
-        lf_cluster_cluster = HDBSCAN(min_cluster_size=10).fit_predict(cluster_lfs)
-        tmp, unique_indices = np.unique(lf_cluster_cluster, return_index=True)
-        unique_indices = unique_indices[1:]
-        print("tmp", tmp)
-        top_cluster_lf = cluster_lfs[unique_indices]
-        top_cluster_lfs[cluster_id] = top_cluster_lf
-    top_cluster_lfs = {k: decode_qwen(torch.tensor(v, dtype=torch.float32), args) for k, v in top_cluster_lfs.items()}
-    return top_cluster_lfs
+        assert cluster_opacities.ndim == 1
+        top_indices = np.asarray(torch.topk(torch.as_tensor(cluster_opacities), min(cluster_opacities.size, 100)).indices)
+        full_cluster_lfs[cluster_id] = cluster_lfs[top_indices]
+    #     lf_cluster_cluster = HDBSCAN(min_cluster_size=10).fit_predict(cluster_lfs)
+    #     tmp, unique_indices = np.unique(lf_cluster_cluster, return_index=True)
+    #     unique_indices = unique_indices[1:]
+    #     print("tmp", tmp)
+    #     top_cluster_lf = cluster_lfs[unique_indices]
+    #     top_cluster_lfs[cluster_id] = top_cluster_lf
+    #     full_cluster_lfs[cluster_id] = cluster_lfs
+    # top_cluster_lfs = {k: decode_qwen(torch.tensor(v, dtype=torch.float32), args) for k, v in top_cluster_lfs.items()}
+    full_cluster_lfs = {
+        k: decode_qwen(torch.tensor(v, dtype=torch.float32), args)
+        for k, v in full_cluster_lfs.items()
+    }
+    return top_cluster_lfs, full_cluster_lfs
 
 
 def properties_through_time(positions_through_time, clusters):
@@ -474,6 +500,7 @@ def timestep_graph(positions, clusters):
     A = np.where(distances >= 0.05, distances, 0)
     return A
 
+
 def lerf_relevancies(lfs: np.ndarray, queries: List[str], canonical_corpus: List[str]):
     """Compute LERF relevance scores for a set of language features.
 
@@ -493,9 +520,10 @@ def lerf_relevancies(lfs: np.ndarray, queries: List[str], canonical_corpus: List
         r = ocn.get_relevancy(lfs, i)
         r = r[:, 0].detach().cpu().numpy()
         lerf_relevancies.append(r)
-    lerf_relevancies = np.stack(lerf_relevancies) # (n_queries, n_lfs)
+    lerf_relevancies = np.stack(lerf_relevancies)  # (n_queries, n_lfs)
 
     return lerf_relevancies
+
 
 def main():
     # determistic seeds
@@ -516,6 +544,9 @@ def main():
         args, model_params, pipeline, hyperparam
     )
 
+    # Normalize qwen features since AE decoder expects unit norm
+    qwen_g._language_feature = qwen_g.get_language_feature / qwen_g.get_language_feature.norm(dim=-1, keepdim=True)
+
     # gaussian filtering
     mask = (rgb_g.get_opacity > 0.1).squeeze()
     filter_gaussians(rgb_g, mask)
@@ -535,11 +566,17 @@ def main():
     # cluster features
     timesteps = np.linspace(0, 1, 20)
     # clip_features = cluster_clip_features(gaussians, clusters, args)
-    qwen_features = cluster_qwen_features(qwen_g, rgb_g, clusters, args)
+    qwen_features, full_qwen_features = cluster_qwen_features(
+        qwen_g, rgb_g, clusters, args
+    )
     pos_through_time = np.stack(
         [positions_at_timestep(rgb_g, t, rgb_scene) for t in timesteps]
     )
-    cluster_pos_through_time, cluster_center_through_time, cluster_extent_through_time = properties_through_time(pos_through_time, clusters)
+    (
+        cluster_pos_through_time,
+        cluster_center_through_time,
+        cluster_extent_through_time,
+    ) = properties_through_time(pos_through_time, clusters)
 
     # graph
     graphs = np.stack(
@@ -562,6 +599,10 @@ def main():
     store_palette(palette, out / "cluster_palette.png")
     for k, v in qwen_features.items():
         np.save(out / f"cluster_qwen_features_{k}.npy", v)
+    for k, v in full_qwen_features.items():
+        np.save(out / f"cluster_qwen_features_full_{k}.npy", v)
+    np.save(out / "clusters.npy", clusters)
+    np.save(out / 'latent_qwen_filtered.npy', qwen_g.get_language_feature.detach().cpu().numpy())
     # gaussians.save_ply(out / "clustered_gaussians.ply")
     # np.save(out / "cluster_clip_features.npy", clip_features)
     # np.save(out / "cluster_ids.npy", clusters)
@@ -573,11 +614,12 @@ def main():
     # visualize to rerun
     rr.init("clusters")
     # rr.log("/", rr.ViewCoordinates.RDF)
-    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy") # log to web viewer if running
-    rr.save(out / "graph_visualization.rrd") # save to file for offline viewing
+    rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")  # log to web viewer if running
+    rr.save(out / "graph_visualization.rrd")  # save to file for offline viewing
 
     log_cluster_pointcloud_through_time(
-        gaussians=clip_g,
+        gaussians_rgb=clip_g,
+        gaussians_qwen=qwen_g,
         clusters=clusters,
         timesteps=timesteps,
         pos_through_time=pos_through_time,
