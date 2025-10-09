@@ -175,7 +175,7 @@ def get_patched_qwen(
 
     Parameters allow enabling weight quantization and optimized attention without editing Transformers.
     """
-    model_path = "/home/tumai/models/Qwen--Qwen2.5-VL-7B-Instruct"
+    model_path = "Qwen/Qwen2.5-VL-7B-Instruct"
 
     quantization_config = None
     if use_bnb_4bit:
