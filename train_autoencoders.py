@@ -77,20 +77,16 @@ def save_dim_reduced(clip_dir: Path, latent_dim: int):
         np.save(reduced_cat_dir / sm_file.name, np.expand_dims(combined_sm, 0))
         np.save(reduced_cat_dir / sm_file.name.replace("s", "f"), combined_feat)
 
-    
-
-
 def train_ae(
     clip_dir: Path,
 ):
-    # train(
-    #     clip_path=clip_dir,
-    #     lf_dir_names=["qwen_patch_features", "qwen_instance_features"],
-    #     latent_dim=3,
-    # )
+    train(
+        clip_path=clip_dir,
+        lf_dir_names=["qwen_patch_features", "qwen_instance_features"],
+        latent_dim=3,
+    )
     save_dim_reduced(
         clip_dir=clip_dir,
-        # lf_dir_names=["qwen_patch_features", "qwen_instance_features"],
         latent_dim=3,
     )
 
@@ -109,13 +105,21 @@ def main():
 
     # generate list of task arguments
     tasks = []
+    tasks_tmp = [] # ! tmp
     video_dirs = Path(PREPROCESSED_ROOT).glob("video[0-9][0-9]")
     for video_dir in video_dirs:
         clip_dirs = video_dir.glob("video[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9]")
         for clip_dir in clip_dirs:
-            if clip_dir.name != "video01_00080": continue
             tasks.append((video_dir, clip_dir))
-            print((video_dir, clip_dir))
+            # if clip_dir.stem == "video27_00480": # ! tmp
+            #     tasks_tmp.append((video_dir, clip_dir))
+            # if clip_dir.stem == "video01_00080": # ! tmp
+            #     tasks_tmp.append((video_dir, clip_dir))
+            if clip_dir.stem == "video25_00402": # ! tmp
+                tasks_tmp.append((video_dir, clip_dir))
+    
+    tasks = tasks_tmp # ! tmp
+
     # run in serial for debugging or threaded per default
     if args.workers == 0:
         for video_dir, clip_dir in tqdm(

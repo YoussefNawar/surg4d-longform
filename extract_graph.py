@@ -156,20 +156,24 @@ def positions_at_timestep(gaussians: GaussianModel, timestep: float, scene: Scen
     return means3D_final.detach().cpu().numpy()
 
 
-def cluster_gaussians(gaussians: GaussianModel, timestep: float, scene: Scene):
-    pos = normalize_indep_dim(positions_at_timestep(gaussians, timestep, scene))
+def cluster_gaussians(gaussians: GaussianModel, scene: Scene):
+    # position
+    pos_through_time = np.concatenate(
+        [
+            normalize_indep_dim(positions_at_timestep(gaussians, t, scene))
+            for t in [0.0, 0.5, 1.0]
+        ],
+        axis=-1,
+    )
+    pos_through_time /= 9
+
+    # instance qwen
     instance_features = gaussians.get_language_feature[:, 3:].detach().cpu().numpy()
     instance_features = normalize_dep_dim(instance_features)
-    # col = rgb_gaussians._features_dc.detach().cpu().numpy()[:, 0, :]
-    # col = SH2RGB(col)
-    # col = np.clip(col, 0.0, 1.0).astype(np.float32)
-    # col = cv2.cvtColor(col.reshape(1, -1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3)
-    # col = normalize_dep_dim(col)
+    instance_features /= 3
 
-    # graph = build_graph(pos, lf, k=10)
-    # clusters = ng_jordan_weiss_spectral_clustering(graph, min_cluster_size=100, d_spectral=10)
-    clustering_feats = np.concatenate([pos, instance_features], axis=1)
-    clusters = HDBSCAN(min_cluster_size=100, metric="euclidean").fit_predict(
+    clustering_feats = np.concatenate([pos_through_time, 2 * instance_features], axis=1)
+    clusters = HDBSCAN(min_cluster_size=50, metric="euclidean").fit_predict(
         clustering_feats
     )
 
@@ -406,10 +410,10 @@ def decode_qwen(lfs: torch.Tensor, args: argparse.Namespace) -> np.ndarray:
 
 
 def cluster_qwen_features(
-    qwen_g: GaussianModel,
+    gaussians: GaussianModel,
     clusters: np.ndarray,
     args: argparse.Namespace,
-    bg_f_per_cluster: int = 32,
+    max_f_per_cluster: int = 40,
     min_f_per_cluster: int = 4,
 ) -> dict[int, np.ndarray]:
     """Extract qwen features from each cluster by sub-clustering its Qwen features.
@@ -425,81 +429,104 @@ def cluster_qwen_features(
         where n_feats is min(N_TOP_FEATS, n_cluster_gaussians)
     """
     cluster_feats = {}
-    hdb = HDBSCAN(
-        min_cluster_size=20, store_centers="centroid"
-    )  # store_centers="medioid" would be slower, but guerantee an observed feature
     for cluster_id in np.unique(clusters):
         cluster_mask = torch.tensor(clusters) == cluster_id
-        cluster_lfs = qwen_g.get_language_feature[cluster_mask][:, :3].detach().cpu().numpy()
-        sub_clusters = hdb.fit_predict(
-            cluster_lfs
-        )  # -1 for unmatched feats (not belonging to clear cluster) and 0-n for clusters
-        if len(np.unique(sub_clusters)) == 1:
-            print(
-                f"HDBSCAN couldn't subcluster features in cluster {cluster_id} containing {cluster_lfs.shape[0]} gaussians, using KMeans on this cluster instead"
-            )
-            kmeans = KMeans(
-                n_clusters=min(bg_f_per_cluster, cluster_lfs.shape[0]), random_state=42
-            ).fit(cluster_lfs)
-            normed_means = kmeans.cluster_centers_ / np.linalg.norm(
-                kmeans.cluster_centers_, axis=-1, keepdims=True
-            )
-            cluster_feats[cluster_id] = torch.as_tensor(normed_means, device="cuda")
-            continue
-        # means = []
-        # for sub_cluster_id in np.unique(sub_clusters)[1:]:
-        #     feature_mean = cluster_lfs[sub_clusters == sub_cluster_id].mean(axis=0)
-        #     means.append(feature_mean / np.linalg.norm(feature_mean))
-        # means = np.stack(means)
-        means = hdb.centroids_ / np.linalg.norm(
-            hdb.centroids_
-        )  # subsitute hdb.medioids_ for medioids
-
-        # Using KMeans on the unclustered gaussians for a representative sample
-
-        if (sub_clusters == -1).sum() < bg_f_per_cluster:
-            bg_means = torch.as_tensor(cluster_lfs[sub_clusters == -1], device="cuda")
-        else:
-            kmeans = KMeans(n_clusters=bg_f_per_cluster, random_state=42).fit(
-                cluster_lfs[sub_clusters == -1]
-            )
-            bg_means = kmeans.cluster_centers_ / np.linalg.norm(
-                kmeans.cluster_centers_, axis=-1, keepdims=True
-            )
-
-        feature_selection = torch.cat(
-            (
-                torch.as_tensor(
-                    means, device="cuda"
-                ),  # attach the means of the feature sub-clusters per cluster
-                torch.as_tensor(
-                    bg_means, device="cuda"
-                ),  # also attach the unclustered features as they contain context information
-            )
+        cluster_lfs = (
+            gaussians.get_language_feature[cluster_mask][:, :3].detach().cpu().numpy()
         )
-
-        # fill up feature selection to at least min_f_per_cluster, if necessary
-        if feature_selection.shape[0] < min_f_per_cluster:
-            feature_selection = torch.cat(
-                (
-                    feature_selection,
-                    torch.as_tensor(
-                        cluster_lfs[
-                            np.random.randint(
-                                0,
-                                cluster_lfs.shape[0],
-                                min_f_per_cluster - feature_selection.shape[0],
-                            )
-                        ],
-                        device="cuda",
-                    ),
-                )
+        random_sample = cluster_lfs[
+            np.random.choice(
+                np.arange(cluster_lfs.shape[0]),
+                np.clip(
+                    cluster_lfs.shape[0],
+                    a_min=min_f_per_cluster,
+                    a_max=max_f_per_cluster,
+                ),
+                replace=True,
             )
-
+        ]
+        feature_selection = torch.tensor(random_sample, device="cuda")
         cluster_feats[cluster_id] = feature_selection.float()
 
     feats_per_cluster = {k: decode_qwen(v, args) for k, v in cluster_feats.items()}
     return feats_per_cluster
+
+    # cluster_feats = {}
+    # hdb = HDBSCAN(
+    #     min_cluster_size=20, store_centers="centroid"
+    # )  # store_centers="medioid" would be slower, but guerantee an observed feature
+    # for cluster_id in np.unique(clusters):
+    #     cluster_mask = torch.tensor(clusters) == cluster_id
+    #     cluster_lfs = qwen_g.get_language_feature[cluster_mask][:, :3].detach().cpu().numpy()
+    #     sub_clusters = hdb.fit_predict(
+    #         cluster_lfs
+    #     )  # -1 for unmatched feats (not belonging to clear cluster) and 0-n for clusters
+    #     if len(np.unique(sub_clusters)) == 1:
+    #         print(
+    #             f"HDBSCAN couldn't subcluster features in cluster {cluster_id} containing {cluster_lfs.shape[0]} gaussians, using KMeans on this cluster instead"
+    #         )
+    #         kmeans = KMeans(
+    #             n_clusters=min(bg_f_per_cluster, cluster_lfs.shape[0]), random_state=42
+    #         ).fit(cluster_lfs)
+    #         normed_means = kmeans.cluster_centers_ / np.linalg.norm(
+    #             kmeans.cluster_centers_, axis=-1, keepdims=True
+    #         )
+    #         cluster_feats[cluster_id] = torch.as_tensor(normed_means, device="cuda")
+    #         continue
+    #     # means = []
+    #     # for sub_cluster_id in np.unique(sub_clusters)[1:]:
+    #     #     feature_mean = cluster_lfs[sub_clusters == sub_cluster_id].mean(axis=0)
+    #     #     means.append(feature_mean / np.linalg.norm(feature_mean))
+    #     # means = np.stack(means)
+    #     means = hdb.centroids_ / np.linalg.norm(
+    #         hdb.centroids_
+    #     )  # subsitute hdb.medioids_ for medioids
+
+    #     # Using KMeans on the unclustered gaussians for a representative sample
+
+    #     if (sub_clusters == -1).sum() < bg_f_per_cluster:
+    #         bg_means = torch.as_tensor(cluster_lfs[sub_clusters == -1], device="cuda")
+    #     else:
+    #         kmeans = KMeans(n_clusters=bg_f_per_cluster, random_state=42).fit(
+    #             cluster_lfs[sub_clusters == -1]
+    #         )
+    #         bg_means = kmeans.cluster_centers_ / np.linalg.norm(
+    #             kmeans.cluster_centers_, axis=-1, keepdims=True
+    #         )
+
+    #     feature_selection = torch.cat(
+    #         (
+    #             torch.as_tensor(
+    #                 means, device="cuda"
+    #             ),  # attach the means of the feature sub-clusters per cluster
+    #             torch.as_tensor(
+    #                 bg_means, device="cuda"
+    #             ),  # also attach the unclustered features as they contain context information
+    #         )
+    #     )
+
+    #     # fill up feature selection to at least min_f_per_cluster, if necessary
+    #     if feature_selection.shape[0] < min_f_per_cluster:
+    #         feature_selection = torch.cat(
+    #             (
+    #                 feature_selection,
+    #                 torch.as_tensor(
+    #                     cluster_lfs[
+    #                         np.random.randint(
+    #                             0,
+    #                             cluster_lfs.shape[0],
+    #                             min_f_per_cluster - feature_selection.shape[0],
+    #                         )
+    #                     ],
+    #                     device="cuda",
+    #                 ),
+    #             )
+    #         )
+
+    #     cluster_feats[cluster_id] = feature_selection.float()
+
+    # feats_per_cluster = {k: decode_qwen(v, args) for k, v in cluster_feats.items()}
+    # return feats_per_cluster
 
 
 def properties_through_time(positions_through_time, clusters):
@@ -579,25 +606,33 @@ def main():
     args, model_params, pipeline, hyperparam = init_params()
 
     # construct all objects
-    gaussians, scene, dataset = load_all_models(args, model_params, pipeline, hyperparam)
+    gaussians, scene, dataset = load_all_models(
+        args, model_params, pipeline, hyperparam
+    )
 
     # gaussian filtering
     opacity_mask = (gaussians._opacity > -3.0).squeeze()
     # opacity_mask = (gaussians.get_opacity > 0.05).squeeze()
-    inst_feat_norm_mask = (gaussians.get_language_feature[:, :3].norm(dim=-1) > 0.05).squeeze()
+    inst_feat_norm_mask = (
+        gaussians.get_language_feature[:, :3].norm(dim=-1) > 0.05
+    ).squeeze()
     filter_gaussians(gaussians, opacity_mask & inst_feat_norm_mask)
 
     # normalize language features
     gaussians._language_feature = gaussians._language_feature.detach()
     patch_feats = gaussians.get_language_feature[:, :3]
     instance_feats = gaussians.get_language_feature[:, 3:]
-    patch_feats = patch_feats / torch.clamp(patch_feats.norm(dim=-1, keepdim=True), min=1e-8)
-    instance_feats = instance_feats / torch.clamp(instance_feats.norm(dim=-1, keepdim=True), min=1e-8)
+    patch_feats = patch_feats / torch.clamp(
+        patch_feats.norm(dim=-1, keepdim=True), min=1e-8
+    )
+    instance_feats = instance_feats / torch.clamp(
+        instance_feats.norm(dim=-1, keepdim=True), min=1e-8
+    )
     gaussians._language_feature[:, :3] = patch_feats
     gaussians._language_feature[:, 3:] = instance_feats
 
     # cluster, filter clusters, filter gaussians that are not in a cluster
-    clusters = cluster_gaussians(gaussians, timestep=0.0, scene=scene)
+    clusters = cluster_gaussians(gaussians, scene=scene)
     filter_clusters(clusters, gaussians, scene)
     cluster_mask = clusters >= 0
     filter_gaussians(gaussians, cluster_mask)
@@ -646,10 +681,12 @@ def main():
             out / "clusters.npy", clusters
         )  # cluster ids after all filtering (n_filtered_gaussians,)
         np.save(
-            out / "patch_latents.npy", gaussians.get_language_feature[:, :3].detach().cpu().numpy()
+            out / "patch_latents.npy",
+            gaussians.get_language_feature[:, :3].detach().cpu().numpy(),
         )  # clip features (n_filtered_gaussians, 3)
         np.save(
-            out / "instance_latents.npy", gaussians.get_language_feature[:, 3:].detach().cpu().numpy()
+            out / "instance_latents.npy",
+            gaussians.get_language_feature[:, 3:].detach().cpu().numpy(),
         )  # qwen features (n_filtered_gaussians, 3)
     cluster_feats_out = out / "c_qwen_feats"
     cluster_feats_out.mkdir(parents=True, exist_ok=True)
@@ -671,6 +708,7 @@ def main():
     )  # adjacency matrices through time - weights are bhattacharyya coefficients (timesteps, n_clusters, n_clusters)
     np.save(out / "opacities.npy", gaussians._opacity.detach().cpu().numpy())
     np.save(out / "positions.npy", gaussians.get_xyz.detach().cpu().numpy())
+    np.save(out / "colors.npy", gaussians.get_features.detach().cpu().numpy())
     # Exit if only running script to save debugging files
     # print("Exiting after saving files"); exit()
 
