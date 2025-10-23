@@ -6,7 +6,7 @@ video_name=video27
 clip_name=video27_00480
 dataset_path=data/cholecseg8k/preprocessed_ssg/${video_name}/${clip_name}
 language_feature_name=qwen_cat_features_dim6
-exp_name=cholecseg8k/${clip_name}_dynamic_lang
+exp_name=cholecseg8k/${clip_name}_qwen_cat_depth_opacity
 
 ########## time-agnostic language field ##########
 export language_feature_hiddendim=${clip_feat_dim}

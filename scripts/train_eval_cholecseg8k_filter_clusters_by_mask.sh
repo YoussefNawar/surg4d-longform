@@ -6,8 +6,8 @@ clip_feat_dim=6
 video_name=video27
 clip_name=video27_00480
 dataset_path=data/cholecseg8k/preprocessed_ssg/${video_name}/${clip_name}
-language_feature_name=qwen_cat_features_dim6
-exp_name=cholecseg8k/${clip_name}_qwen_cat_depth_opacity
+language_feature_name=qwen3_cat_features_dim6
+exp_name=cholecseg8k/${clip_name}_qwen3_cat_depth_opacity_maskclusterfilter_coverage80_factor1pos
 
 # ====== Qwen3 (small, 8B) feature precomputation for this clip ======
 QWEN3_MODEL_ID="Qwen/Qwen3-VL-8B-Instruct"
@@ -46,9 +46,10 @@ export language_feature_hiddendim=${clip_feat_dim}
   --feature_level 0 --skip_train --skip_test \
   --configs arguments/cholecseg8k/no_tv.py --mode lang --no_dlang 1 --load_stage fine-lang \
   --num_views 5 \
-  --qwen_autoencoder_ckpt_path data/cholecseg8k/preprocessed_ssg/${video_name}/${clip_name}/autoencoder/best_ckpt.pth \
+  --qwen_autoencoder_ckpt_path data/cholecseg8k/preprocessed_ssg/${video_name}/${clip_name}/autoencoder_qwen3/best_ckpt.pth \
+  --qwen3 \
   --enable_mask_filter \
-  --mask_dir /home/students/lmu_proj/shared_data/data/cholecseg8k/${video_name}/${clip_name}/instance_masks \
+  --mask_dir /home/students/lmu_proj/surgery-scene-graphs/data/cholecseg8k/preprocessed_ssg/${video_name}/${clip_name}/instance_masks \
   --coverage_threshold 0.8 \
   --store_verbose # store features of filtered gaussians etc., turn off when running with whole dataset
 

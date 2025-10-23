@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from sklearn.cluster import HDBSCAN, KMeans
 import torch
 import argparse
@@ -69,6 +69,9 @@ def init_params():
     parser.add_argument("--load_stage", type=str, default="fine-lang")
     parser.add_argument("--num_views", type=int, default=5)
     parser.add_argument("--qwen_autoencoder_ckpt_path", type=str, default=None)
+    parser.add_argument(
+        "--qwen3", action="store_true", help="Use Qwen3-specific autoencoder"
+    )
     # mask-based cluster filtering
     parser.add_argument("--enable_mask_filter", action="store_true")
     parser.add_argument("--mask_dir", type=str, default=None)
@@ -245,12 +248,16 @@ def cluster_gaussians(gaussians: GaussianModel, scene: Scene):
     pos_through_time /= 9
 
     # instance qwen
-    instance_features = gaussians.get_language_feature[:, 3:].detach().cpu().numpy()
-    instance_features = normalize_dep_dim(instance_features)
-    instance_features /= 3
+    lf = gaussians.get_language_feature.detach().cpu().numpy()
+    if lf.shape[1] >= 4:
+        instance_features = lf[:, 3:]
+        instance_features = normalize_dep_dim(instance_features)
+        instance_features /= 3
+    else:
+        instance_features = np.zeros((lf.shape[0], 0), dtype=lf.dtype)
 
     clustering_feats = np.concatenate(
-        [2 * pos_through_time, 1 * instance_features], axis=1
+        [1 * pos_through_time, 1 * instance_features], axis=1
     )  # factor is how the lf's are weighted to the spatial positions
     clusters = HDBSCAN(
         min_cluster_size=250, metric="euclidean", min_samples=30
@@ -412,11 +419,27 @@ def bhattacharyya_coefficient(mu1, Sigma1, mu2, Sigma2):
 def decode_qwen(lfs: torch.Tensor, args: argparse.Namespace) -> np.ndarray:
     BATCH_SIZE = 1024
 
+    # Load checkpoint first to infer the correct input dimension (supports 3584 for Qwen2.5 and 4096 for Qwen3)
+    state_dict = torch.load(args.qwen_autoencoder_ckpt_path, map_location="cuda")
+    # encoder.0.weight has shape [hidden, input_dim]
+    inferred_input_dim = None
+    if isinstance(state_dict, dict):
+        for key in [
+            "encoder.0.weight",
+            "module.encoder.0.weight",
+        ]:
+            w = state_dict.get(key)
+            if w is not None:
+                inferred_input_dim = int(w.shape[1])
+                break
+    if inferred_input_dim is None:
+        inferred_input_dim = 4096 if getattr(args, "qwen3", False) else 3584
+
     ae = QwenAutoencoder(
-        input_dim=3584,
+        input_dim=inferred_input_dim,
         latent_dim=3,
     ).to("cuda")
-    ae.load_state_dict(torch.load(args.qwen_autoencoder_ckpt_path, map_location="cuda"))
+    ae.load_state_dict(state_dict)
     ae.eval()
 
     decoded_lfs = []
@@ -510,9 +533,11 @@ def cluster_qwen_features(
     cluster_feats = {}
     for cluster_id in np.unique(clusters):
         cluster_mask = torch.tensor(clusters) == cluster_id
-        cluster_lfs = (
-            gaussians.get_language_feature[cluster_mask][:, :3].detach().cpu().numpy()
-        )
+        lfs = gaussians.get_language_feature[cluster_mask]
+        if lfs.shape[-1] >= 3:
+            cluster_lfs = lfs[:, :3].detach().cpu().numpy()
+        else:
+            cluster_lfs = lfs.detach().cpu().numpy()
         random_sample = cluster_lfs[
             np.random.choice(
                 np.arange(cluster_lfs.shape[0]),
@@ -861,12 +886,16 @@ def filter_clusters_by_mask_render(
     iou_threshold: float = 0.5,  # TODO: tune this
     num_views: Optional[int] = None,
 ) -> np.ndarray:
-    """Filter clusters by rendering them and comparing against watershed instance masks with IoU.
+    """Filter clusters by rendering them and comparing against watershed instance masks using coverage.
 
-    Rules:
-    - If IoU with all instance masks is below threshold in all views -> discard cluster.
-    - If IoU >= threshold with more than one instance mask in any view -> discard cluster (ambiguous).
-    - Otherwise keep cluster. Cluster ids are remapped to be contiguous.
+    Implemented rules:
+    - Masks are loaded strictly from .npy files.
+    - Use the same N timesteps as graph extraction (N_TIMESTEPS) and match each timestep to the corresponding video frame.
+    - For each selected timestep, require coverage ≥ threshold with the same instance mask id across all timesteps
+      (no summation across masks). Coverage = |render ∩ mask| / |mask|.
+    - If any timestep is missing a .npy mask, renders empty, or fails the coverage condition (or switches instance id),
+      the cluster is discarded.
+    - Cluster ids are remapped to be contiguous for the kept clusters.
     """
     unique_ids = [cid for cid in np.unique(clusters) if cid >= 0]
     if len(unique_ids) == 0:
@@ -883,51 +912,60 @@ def filter_clusters_by_mask_render(
         )
         return clusters
 
-    # Select views
+    # Use the same timesteps as the graph extraction and use the matching frames
     video_cams = scene.getVideoCameras()
     total_views = len(video_cams)
     if total_views == 0:
         logger.warning("No video cameras available; skipping mask-based filtering.")
         return clusters
-    # Restrict views strictly to those with .npy masks available
-    cams_with_masks = [c for c in video_cams if _npy_mask_exists_for_cam(c, mask_root)]
-    if not cams_with_masks:
-        logger.warning(
-            "No per-frame .npy masks found for any view; skipping mask-based filtering."
-        )
-        return clusters
-    k = args.num_views if num_views is None else num_views
-    k = max(1, min(k, len(cams_with_masks)))
-    view_indices = random.sample(range(len(cams_with_masks)), k)
-    cams = [cams_with_masks[i] for i in view_indices]
+    timesteps = np.linspace(0, 1, N_TIMESTEPS, dtype=np.float32)
+    # For each timestep, choose the corresponding frame camera with .npy mask
+    cams: List[Tuple[Camera, float]] = []
+    for t in timesteps:
+        # Scene provides a list; we approximate by evenly spaced indices across video frames
+        idx = int(round(t * max(0, total_views - 1)))
+        cam = video_cams[idx]
+        if not _npy_mask_exists_for_cam(cam, mask_root):
+            logger.warning(
+                f"Missing .npy mask for frame {cam.image_name}; skipping mask-based filtering."
+            )
+            return clusters
+        cams.append((cam, float(t)))
 
     # Decide keep/discard per cluster (allow multiple mask intersections; single good coverage is enough)
     keep_cluster: dict[int, bool] = {}
     for cid in unique_ids:
         cid_mask = torch.tensor(clusters == cid, device="cuda")
         all_timesteps_ok = True
-        evaluated_views = 0
-        for cam in cams:
+        matched_instance_id: Optional[int] = None
+        for cam, timestep in cams:
             cluster_mask = _render_cluster_binary_mask(
                 gaussians, cid_mask, cam, pipe, args, dataset
             )
             if cluster_mask.sum() == 0:
-                # Not visible in this view, ignore this timestep
-                continue
-            evaluated_views += 1
+                # If cluster renders empty at any selected timestep, reject
+                all_timesteps_ok = False
+                break
             masks = _load_watershed_instance_masks(cam, mask_root)
             if not masks:
-                # Mask is required per timestep; if missing, fail this cluster
                 all_timesteps_ok = False
                 break
-            # Threshold must be met by a single mask (no summation), per timestep
-            timestep_ok = any(
-                compute_mask_coverage(cluster_mask, m) >= iou_threshold for m in masks
-            )
-            if not timestep_ok:
+            # Require the same instance mask to exceed threshold across all timesteps
+            # Determine best mask for this timestep
+            coverages = [compute_mask_coverage(cluster_mask, m) for m in masks]
+            best_idx = int(np.argmax(coverages)) if coverages else -1
+            if best_idx < 0 or coverages[best_idx] < iou_threshold:
                 all_timesteps_ok = False
                 break
-        keep = all_timesteps_ok and evaluated_views > 0
+            if matched_instance_id is None:
+                # Bind to this instance id by index among masks list using label map equivalence is not guaranteed;
+                # rely on per-frame instance ordering implicitly stable in provided .npy format
+                matched_instance_id = best_idx
+            elif matched_instance_id != best_idx:
+                # Different best instance across time -> reject
+                all_timesteps_ok = False
+                break
+        keep = all_timesteps_ok
         keep_cluster[cid] = keep
 
     # Remap cluster ids: kept -> 0..K-1, discarded -> -1
@@ -969,9 +1007,13 @@ def main():
     opacity_mask = (gaussians.get_opacity >= 0.5).squeeze()
     # opacity_mask = (gaussians._opacity > -3.0).squeeze()
     # opacity_mask = (gaussians.get_opacity > 0.05).squeeze()
-    inst_feat_norm_mask = (
-        gaussians.get_language_feature[:, 3:].norm(dim=-1) > 0.05
-    ).squeeze()
+    # Support both 6-D (patch+instance) and 3-D (patch-only) language features
+    lf = gaussians.get_language_feature
+    if lf.shape[-1] >= 4:
+        inst_feat_norm_mask = (lf[:, 3:].norm(dim=-1) > 0.05).squeeze()
+    else:
+        # Patch-only features: don't filter by (missing) instance part
+        inst_feat_norm_mask = torch.ones(lf.shape[0], dtype=torch.bool, device=lf.device)
     filter_gaussians(gaussians, opacity_mask & inst_feat_norm_mask)
     # filter_gaussians(gaussians, opacity_mask)\\
     print(
@@ -980,16 +1022,25 @@ def main():
 
     # normalize language features
     gaussians._language_feature = gaussians._language_feature.detach()
-    patch_feats = gaussians.get_language_feature[:, :3]
-    instance_feats = gaussians.get_language_feature[:, 3:]
-    patch_feats = patch_feats / torch.clamp(
-        patch_feats.norm(dim=-1, keepdim=True), min=1e-8
-    )
-    instance_feats = instance_feats / torch.clamp(
-        instance_feats.norm(dim=-1, keepdim=True), min=1e-8
-    )
-    gaussians._language_feature[:, :3] = patch_feats
-    gaussians._language_feature[:, 3:] = instance_feats
+    lf = gaussians.get_language_feature
+    if lf.shape[-1] >= 4:
+        patch_feats = lf[:, :3]
+        instance_feats = lf[:, 3:]
+        patch_feats = patch_feats / torch.clamp(
+            patch_feats.norm(dim=-1, keepdim=True), min=1e-8
+        )
+        instance_feats = instance_feats / torch.clamp(
+            instance_feats.norm(dim=-1, keepdim=True), min=1e-8
+        )
+        gaussians._language_feature[:, :3] = patch_feats
+        gaussians._language_feature[:, 3:] = instance_feats
+    else:
+        # Only 3-D patch latents present
+        patch_feats = lf
+        patch_feats = patch_feats / torch.clamp(
+            patch_feats.norm(dim=-1, keepdim=True), min=1e-8
+        )
+        gaussians._language_feature = patch_feats
 
     # cluster, optional mask-based cluster filtering, filter gaussians not in clusters
     clusters = cluster_gaussians(gaussians, scene=scene)

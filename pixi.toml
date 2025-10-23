@@ -14,7 +14,11 @@ setup = { depends-on = ["install-simple-knn", "install-rasterization", "install-
 # run pixi run setup after pixi install to install cuda extensions
 
 [activation.env]
+<<<<<<< Updated upstream
 # some cuda extensions need to link against pytorch
+=======
+# CUDA_VISIBLE_DEVICES = "$(if [ $(hostname) = 'a4000-2402n18' ]; then echo '1'; fi)"
+>>>>>>> Stashed changes
 LD_LIBRARY_PATH = "$PIXI_PROJECT_ROOT/.pixi/envs/default/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH"
 # ignore ~/.local packages in case someone accidentally installed stuff with system python
 PYTHONNOUSERSITE = "1"
