@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# TODO: udpate this
 """
 Main script to run ablation study for multi-frame triplet recognition.
 
@@ -17,32 +18,117 @@ from pathlib import Path
 from datetime import datetime
 
 from benchmark_config import BenchmarkConfig
-from multiframe_selector import MultiFrameSelector
-from multiframe_evaluator import MultiFrameEvaluator
+from frame_selectors import TripletsFrameSelector
+from frame_evaluators import TripletsFrameEvaluator
+
+import yaml
+
+
+def evaluate_triplets(config):
+    # Select samples
+    print("Selecting samples...")
+    selector = TripletsFrameSelector(config)
+    samples = selector.select_sequences()
+    if not samples:
+        print("ERROR: No samples selected! Check if preprocessed data is available.")
+        return 1
+    selector.print_summary(samples)
+    # TODO: will need an evaluator for each task; similarly for the selector
+    # Run ablation study
+    print("\nInitializing evaluator...")
+    evaluator = TripletsFrameEvaluator(config)
+    results = evaluator.run_ablation_study(samples, ablations=config.triplets_config['ablations'])
+    return evaluator, results
+
+
+def save_triplet_results(evaluator, results, output_path, results_dir):
+    # Print comparison
+    print("\n" + "="*80)
+    print("ABLATION STUDY RESULTS")
+    print("="*80)
+    print()
+    print(f"{'Condition':<25} {'Instrument':<12} {'Verb':<12} {'Target':<12} {'Full Triplet':<12}")
+    print("-"*80)
+    for condition, data in results['conditions'].items():
+        metrics = data['metrics']
+        print(f"{condition:<25} "
+              f"{metrics['instrument_acc']:>10.1%}  "
+              f"{metrics['verb_acc']:>10.1%}  "
+              f"{metrics['target_acc']:>10.1%}  "
+              f"{metrics['triplet_acc']:>10.1%}")
+    print("="*80)
+    # Compute improvements
+    if 'single_frame' in results['conditions'] and 'multiframe' in results['conditions']:
+        single = results['conditions']['single_frame']['metrics']['triplet_acc']
+        multi = results['conditions']['multiframe']['metrics']['triplet_acc']
+        improvement = (multi - single) / single * 100 if single > 0 else 0
+        print(f"\nTemporal improvement: {improvement:+.1f}%")
+    if 'multiframe' in results['conditions'] and 'multiframe_graph' in results['conditions']:
+        multi = results['conditions']['multiframe']['metrics']['triplet_acc']
+        graph = results['conditions']['multiframe_graph']['metrics']['triplet_acc']
+        improvement = (graph - multi) / multi * 100 if multi > 0 else 0
+        print(f"Graph improvement: {improvement:+.1f}%")
+    # Save results
+    if output_path:
+        output_path = Path(output_path)
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = results_dir / f"ablation_{timestamp}.json"
+    evaluator.save_results(results, output_path)
+    print(f"\n✓ Ablation study complete!")
+    print(f"✓ Results saved to: {output_path}")
+
+
+def evaluate_temporal(config):
+    return None
+
+def evaluate_spatial(config):
+    return None
+
+def evaluate_spatiotemporal(config):
+    return None
+
+
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Run ablation study for multi-frame triplet recognition'
+        description='Run ablation study for several tasks.'
+    )
+    # TODO: remove?
+    # parser.add_argument(
+    #     '--num_sequences',
+    #     type=int,
+    #     default=5,
+    #     help='Number of sequences to evaluate (default: 5)'
+    # )
+    # TODO: remove?
+    # parser.add_argument(
+    #     '--frames_per_sequence',
+    #     type=int,
+    #     default=5,
+    #     help='Number of frames per sequence (default: 5)'
+    # )
+    # TODO: This used to be conditions, now it's full config for that task
+    parser.add_argument(
+        '--triplets_config',
+        default=None,
+        help='Config for triplets (default: None)'
     )
     parser.add_argument(
-        '--num_sequences',
-        type=int,
-        default=5,
-        help='Number of sequences to evaluate (default: 5)'
+        '--temporal_config',
+        default=None,
+        help='Config for temporal (default: None)'
     )
     parser.add_argument(
-        '--frames_per_sequence',
-        type=int,
-        default=5,
-        help='Number of frames per sequence (default: 5)'
+        '--spatial_config',
+        default=None,
+        help='Config for spatial (default: None)'
     )
     parser.add_argument(
-        '--conditions',
-        nargs='+',
-        choices=['single_frame', 'multiframe', 'multiframe_graph'],
-        default=['single_frame', 'multiframe', 'multiframe_graph'],
-        help='Conditions to evaluate (default: all three)'
+        '--spatiotemporal_config',
+        default=None,
+        help='Config for spatiotemporal (default: None)'
     )
     parser.add_argument(
         '--output',
@@ -64,93 +150,58 @@ def main():
     
     args = parser.parse_args()
     
+    # Load configs with yaml for each task if provided
+    triplets_config = None
+    temporal_config = None
+    spatial_config = None
+    spatiotemporal_config = None
+    if args.triplets_config:
+        with open(args.triplets_config, 'r') as f:
+            triplets_config = yaml.load(f, Loader=yaml.FullLoader)
+            print(f"triplets_config: {triplets_config}")
+    if args.temporal_config:
+        with open(args.temporal_config, 'r') as f:
+            temporal_config = yaml.load(f, Loader=yaml.FullLoader)
+    if args.spatial_config:
+        with open(args.spatial_config, 'r') as f:
+            spatial_config = yaml.load(f, Loader=yaml.FullLoader)
+    if args.spatiotemporal_config:
+        with open(args.spatiotemporal_config, 'r') as f:
+            spatiotemporal_config = yaml.load(f, Loader=yaml.FullLoader)
+
     # Configuration
     config = BenchmarkConfig(
-        num_test_frames=args.num_sequences,
+        triplets_config=triplets_config,
+        temporal_config=temporal_config,
+        spatial_config=spatial_config,
+        spatiotemporal_config=spatiotemporal_config,
         model_name="qwen",
+        # TODO: maybe make conditional but probably fixing to 3 once we have merged current remote and everything works
         qwen_version="qwen2.5",
         use_4bit_quantization=args.use_4bit,
-        use_scene_graph=('multiframe_graph' in args.conditions),
-        exact_match=True,
+        # TODO: remove? know how to evaluate triplets now
+        # exact_match=True,
         save_responses=True,
         save_prompts=True,
         verbose=args.verbose
     )
+
+    print(f"Evaluating triplets: {'✅' if config.triplets_config is not None else '❌'}")
+    print(f"Evaluating temporal: {'✅' if config.temporal_config is not None else '❌'}")
+    print(f"Evaluating spatial: {'✅' if config.spatial_config is not None else '❌'}")
+    print(f"Evaluating spatiotemporal: {'✅' if config.spatiotemporal_config is not None else '❌'}")
     
-    print("="*80)
-    print("MULTI-FRAME ABLATION STUDY")
-    print("="*80)
-    print(f"\nConfiguration:")
-    print(f"  Number of sequences: {args.num_sequences}")
-    print(f"  Frames per sequence: {args.frames_per_sequence}")
-    print(f"  Conditions: {', '.join(args.conditions)}")
-    print(f"  Model: Qwen2.5-VL-7B")
-    print(f"  4-bit quantization: {args.use_4bit}")
-    print()
-    
-    # Select samples
-    print("Selecting multi-frame sequences...")
-    selector = MultiFrameSelector(config)
-    samples = selector.select_sequences(
-        num_sequences=args.num_sequences,
-        frames_per_sequence=args.frames_per_sequence,
-        min_config_length=20
-    )
-    
-    if not samples:
-        print("ERROR: No samples selected! Check if preprocessed data is available.")
-        return 1
-    
-    selector.print_summary(samples)
-    
-    # Run ablation study
-    print("\nInitializing evaluator...")
-    evaluator = MultiFrameEvaluator(config)
-    
-    results = evaluator.run_ablation_study(samples, conditions=args.conditions)
-    
-    # Print comparison
-    print("\n" + "="*80)
-    print("ABLATION STUDY RESULTS")
-    print("="*80)
-    print()
-    print(f"{'Condition':<25} {'Instrument':<12} {'Verb':<12} {'Target':<12} {'Full Triplet':<12}")
-    print("-"*80)
-    
-    for condition, data in results['conditions'].items():
-        metrics = data['metrics']
-        print(f"{condition:<25} "
-              f"{metrics['instrument_acc']:>10.1%}  "
-              f"{metrics['verb_acc']:>10.1%}  "
-              f"{metrics['target_acc']:>10.1%}  "
-              f"{metrics['triplet_acc']:>10.1%}")
-    
-    print("="*80)
-    
-    # Compute improvements
-    if 'single_frame' in results['conditions'] and 'multiframe' in results['conditions']:
-        single = results['conditions']['single_frame']['metrics']['triplet_acc']
-        multi = results['conditions']['multiframe']['metrics']['triplet_acc']
-        improvement = (multi - single) / single * 100 if single > 0 else 0
-        print(f"\nTemporal improvement: {improvement:+.1f}%")
-    
-    if 'multiframe' in results['conditions'] and 'multiframe_graph' in results['conditions']:
-        multi = results['conditions']['multiframe']['metrics']['triplet_acc']
-        graph = results['conditions']['multiframe_graph']['metrics']['triplet_acc']
-        improvement = (graph - multi) / multi * 100 if multi > 0 else 0
-        print(f"Graph improvement: {improvement:+.1f}%")
-    
-    # Save results
-    if args.output:
-        output_path = Path(args.output)
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = config.results_dir / f"ablation_{timestamp}.json"
-    
-    evaluator.save_results(results, output_path)
-    
-    print(f"\n✓ Ablation study complete!")
-    print(f"✓ Results saved to: {output_path}")
+    # Evaluate each task individually
+    # TODO: do we want a base config and a task specific config?
+    if triplets_config is not None:
+        evaluator, results = evaluate_triplets(config)
+        save_triplet_results(evaluator, results, args.output, config.results_dir)
+    if temporal_config is not None:
+        evaluate_temporal(config)
+    if spatial_config is not None:
+        evaluate_spatial(config)
+    if spatiotemporal_config is not None:
+        evaluate_spatiotemporal(config)
     
     return 0
 

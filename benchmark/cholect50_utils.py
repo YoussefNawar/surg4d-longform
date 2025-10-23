@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple, Optional
 class CholecT50Loader:
     """Load and process CholecT50 action triplet annotations"""
     
-    def __init__(self, cholect50_path: str = "/home/students/lmu_proj/shared_data/CholecT50"):
+    def __init__(self, cholect50_path: str = "/home/students/lmu_proj/shared_data/data/CholecT50"):
         self.root = Path(cholect50_path)
         self.labels_dir = self.root / "labels"
         self.videos_dir = self.root / "videos"
@@ -24,6 +24,7 @@ class CholecT50Loader:
             Dictionary with annotations and metadata
         """
         label_file = self.labels_dir / f"VID{video_id:02d}.json"
+        print(f"label_file: {label_file}")
         if not label_file.exists():
             raise FileNotFoundError(f"Labels not found for video {video_id}")
             
@@ -46,26 +47,28 @@ class CholecT50Loader:
         
         frame_key = str(frame_num)
         if frame_key not in annotations:
+            print(f"⚠️ No triplets found for frame {frame_num}")
             return []
         
         triplets = []
         for triplet_data in annotations[frame_key]:
+            print(f"triplet_data: {triplet_data}")
             # Format: [triplet_id, i, v, ...padding..., t, ...padding..., phase]
             # Based on the observed pattern
             triplet_id = triplet_data[0]
             instrument_id = triplet_data[1]
-            verb_id = triplet_data[2]
-            target_id = triplet_data[7]
+            verb_id = triplet_data[7]
+            if verb_id == -1:
+                verb_id = 9
+            target_id = triplet_data[8]
+            if target_id == -1:
+                target_id = 14
             phase_id = triplet_data[14]
-            
-            # Skip null/invalid triplets
-            if triplet_id == -1 or triplet_id >= 94:  # null triplets are 94-99, -1 is no action
-                continue
-                
+                            
             triplet = {
                 'triplet_id': int(triplet_id),
-                'triplet_name': categories['triplet'][str(int(triplet_id))],
-                'instrument': categories['instrument'][str(int(instrument_id))],
+                # 'triplet_name': categories['triplet'][str(int(triplet_id))],
+                'instrument': 'null_instrument',
                 'verb': categories['verb'][str(int(verb_id))],
                 'target': categories['target'][str(int(target_id))],
                 'phase': categories['phase'][str(int(phase_id))],

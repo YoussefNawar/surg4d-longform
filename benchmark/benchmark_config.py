@@ -9,39 +9,53 @@ from pathlib import Path
 @dataclass
 class BenchmarkConfig:
     """Configuration for benchmark evaluation"""
-    
+
+    # Either none or a dict witht the config for that task
+    triplets_config: Optional[dict] = None
+    temporal_config: Optional[dict] = None
+    spatial_config: Optional[dict] = None
+    spatiotemporal_config: Optional[dict] = None
+
     # Data paths
-    cholect50_root: Path = Path("/home/students/lmu_proj/shared_data/CholecT50")
+    # TODO: most of these should come from the prior config files
+    cholect50_root: Path = Path("/home/students/lmu_proj/shared_data/data/cholect50")
     preprocessed_root: Path = Path("/home/students/lmu_proj/shared_data/data/cholecseg8k/preprocessed_ssg")
     output_root: Path = Path("/home/students/lmu_proj/shared_data/output/cholecseg8k")
     results_dir: Path = Path("/home/students/lmu_proj/surgery-scene-graphs/benchmark/results")
+
+    # TODO: this needs to come from the config files that were used in creating the model
+    video_dir: Path = Path("/home/students/lmu_proj/shared_data/data/cholecseg8k/preprocessed_ssg/video01")
+    graph_dir: Path = Path("/home/students/lmu_proj/surgery-scene-graphs/output/cholecseg8k/video01_00080_qwen_cat/graph")
     
     # Model settings
     model_name: Literal["qwen", "gpt4"] = "qwen"
     qwen_version: Literal["qwen2.5", "qwen3"] = "qwen2.5"  # Differentiate between Qwen versions
-    use_4bit_quantization: bool = True
+    use_4bit_quantization: bool = False
     device: str = "auto"
     
     # Evaluation settings
-    num_test_frames: int = 5  # Start small
+    # TODO: remove?
+    # num_test_frames: int = 5  # Start small
     seed: int = 42
     
     # Question types to evaluate
+    # TODO: remove? not sure if this is currently used
     test_triplet_recognition: bool = True
     test_component_recognition: bool = True  # Individual I, V, T
     test_spatial_reasoning: bool = False  # Requires scene graph
     test_temporal_reasoning: bool = False  # Requires multiple frames
     
     # Scene graph settings
-    use_scene_graph: bool = False
+    # TODO: remove, should be derived from the ablations in the task specific configs?
+    # use_scene_graph: bool = False
     graph_encoding: Literal["xml", "natural_language", "both"] = "xml"
     include_object_features: bool = True
     include_spatial_relationships: bool = True
     include_3d_positions: bool = True
     
     # Evaluation strictness
-    exact_match: bool = True  # Use exact string matching only (no fuzzy matching/synonyms)
-    case_sensitive: bool = False
+    # exact_match: bool = True  # Use exact string matching only (no fuzzy matching/synonyms)
+    # case_sensitive: bool = False
     
     # Output settings
     save_responses: bool = True

@@ -600,11 +600,15 @@ def prompt_with_graph(
     with open('qwen_messages.json', 'w') as fp:
         json.dump(messages, fp)
 
+    # print(f"messages: {messages}")
+    print(f"shape of node_feats: {len(node_feats)}")
+
     return generate_with_vision_features(
         messages=messages,
         vision_features=[torch.Tensor(f) for f in node_feats],
         model=model,
         processor=processor,
+        # TODO: increase this?
         max_tokens=128,
     )
 
