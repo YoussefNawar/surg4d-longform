@@ -1,3 +1,7 @@
+FRAMERATE: 25
+NUM_FRAMES: 80
+TEMP_CONTEXT_FR_MULTIPLIER: 1
+
 # ablations: ["single_frame", "multiframe", "multiframe_graph"]
 ablations: ["multiframe_graph"]
 
@@ -128,56 +132,6 @@ multiframe_graph_system_prompt: |
   You keep responses concise while answering all aspects of the question.
 
 multiframe_graph_prompt: |
-  YOUR TASK: Identify instrument-verb-target triplets that are CURRENTLY ACTIVE based on the scene graph.
+  First, describe the graph that you have received. What do you see, what seems to be happening here? Go timestep by timestep and give a summary.
+  Next, can you identify a 3D position where a grasper is interacting with the gallbladder? Based on what do you reach that position? Can you reason about the xyz positions provided for the graph nodes?
 
-  CRITICAL RULES:
-  1. Use the scene graph's spatial relationships (edges with small distances) to identify which instruments are interacting with which targets
-  2. Use temporal evolution of node positions and edge distances to determine the action/verb
-  3. Verify your graph-based inference by examining the object images
-  4. ONLY report triplets where BOTH spatial proximity (edges) AND visual appearance confirm the interaction
-  5. If an instrument has no close edges to anatomical structures, do NOT report it
-  6. DO NOT use speculative language: "appears", "seems", "likely", "possibly", "might be"
-  7. DO NOT infer based on typical procedures - only use the graph and images provided
-  8. An empty response {"triplets": []} is CORRECT if no clear interactions are found
-
-  VALID CATEGORIES:
-  "instrument": {"0": "grasper", "1": "bipolar", "2": "hook", "3": "scissors", "4": "clipper", "5": "irrigator"}
-  "verb": {"0": "grasp", "1": "retract", "2": "dissect", "3": "coagulate", "4": "clip", "5": "cut", "6": "aspirate", "7": "irrigate", "8": "pack", "9": "null_verb"}
-  "target": {"0": "gallbladder", "1": "cystic_plate", "2": "cystic_duct", "3": "cystic_artery", "4": "cystic_pedicle", "5": "blood_vessel", "6": "fluid", "7": "abdominal_wall_cavity", "8": "liver", "9": "adhesion", "10": "omentum", "11": "peritoneum", "12": "gut", "13": "specimen_bag", "14": "null_target"}
-
-  ANALYSIS PROCEDURE:
-  1. Identify all instruments and anatomical targets from the object images
-  2. For each instrument, examine its edges across all timesteps to find close interactions (small distance values)
-  3. Analyze how edge distances and node positions change over time to determine the action
-  4. Verify the interaction visually by examining the object images
-  5. Report only triplets with strong spatial-temporal evidence AND visual confirmation
-
-  RESPONSE FORMAT:
-  First, list the objects identified (instruments and anatomy).
-  Then, describe spatial relationships (close edges) indicating interactions.
-  Then, describe temporal changes indicating specific actions.
-  Finally, output ONLY the triplets you are certain about based on graph structure + visual confirmation.
-
-  If uncertain or no clear interactions found, return: {"triplets": []}
-
-  Example of GOOD response:
-  "Objects: grasper (id=0), gallbladder (id=3), bipolar (id=1), blood_vessel (id=5).
-  Spatial relationships: Edges show grasper-gallbladder distance consistently <0.05 across all timesteps. Bipolar-vessel distance is <0.03 at t=1,2,3.
-  Temporal changes: Grasper-gallbladder edge remains stable (grasping). Bipolar-vessel edge stable while vessel properties change (coagulating).
-  Visual confirmation: Grasper visibly holds gallbladder. Bipolar in contact with vessel."
-  {"triplets": [
-    {"instrument": "grasper", "verb": "grasp", "target": "gallbladder"},
-    {"instrument": "bipolar", "verb": "coagulate", "target": "blood_vessel"}
-  ]}
-
-  Example of BAD response:
-  "A hook object is visible and is near the cystic duct in the graph, so it might be dissecting."
-  {"triplets": [{"instrument": "hook", "verb": "dissect", "target": "cystic_duct"}]}
-  (BAD because: does not cite specific edge distances, does not verify temporal changes, uses speculative language)
-
-  Output format:
-  {
-    "triplets": [
-      {"instrument": "...", "verb": "...", "target": "..."}
-    ]
-  }

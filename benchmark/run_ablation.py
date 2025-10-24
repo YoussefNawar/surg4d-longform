@@ -33,7 +33,6 @@ def evaluate_triplets(config):
         print("ERROR: No samples selected! Check if preprocessed data is available.")
         return 1
     selector.print_summary(samples)
-    # TODO: will need an evaluator for each task; similarly for the selector
     # Run ablation study
     print("\nInitializing evaluator...")
     evaluator = TripletsFrameEvaluator(config)
@@ -90,26 +89,10 @@ def evaluate_spatiotemporal(config):
 
 
 
-
 def main():
     parser = argparse.ArgumentParser(
         description='Run ablation study for several tasks.'
     )
-    # TODO: remove?
-    # parser.add_argument(
-    #     '--num_sequences',
-    #     type=int,
-    #     default=5,
-    #     help='Number of sequences to evaluate (default: 5)'
-    # )
-    # TODO: remove?
-    # parser.add_argument(
-    #     '--frames_per_sequence',
-    #     type=int,
-    #     default=5,
-    #     help='Number of frames per sequence (default: 5)'
-    # )
-    # TODO: This used to be conditions, now it's full config for that task
     parser.add_argument(
         '--triplets_config',
         default=None,
@@ -178,12 +161,7 @@ def main():
         model_name="qwen",
         # TODO: maybe make conditional but probably fixing to 3 once we have merged current remote and everything works
         qwen_version="qwen2.5",
-        use_4bit_quantization=args.use_4bit,
-        # TODO: remove? know how to evaluate triplets now
-        # exact_match=True,
-        save_responses=True,
-        save_prompts=True,
-        verbose=args.verbose
+        use_4bit_quantization=args.use_4bit
     )
 
     print(f"Evaluating triplets: {'✅' if config.triplets_config is not None else '❌'}")

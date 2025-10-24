@@ -26,28 +26,7 @@ from benchmark.cholect50_utils import CholecT50Loader
 from qwen_vl import get_patched_qwen, prompt_with_graph
 from qwen_vl_utils import process_vision_info
 
-
-# TODO: why is this defined in here, not in the frame_selectors?
-@dataclass
-class MultiFrameSample:
-    """Sample with multiple frames for temporal evaluation"""
-    video_id: int
-    start_frame: int
-    end_frame: int
-    clip_start: int
-    image_paths: List[Path]  # Multiple frames
-    graph_path: Optional[Path]
-    # TODO: For now, loading these also for non-triplet tasks; might change this
-    gt_triplets: List[Dict]  # Ground truth for the sequence
-    gt_phase: Optional[str]
-    
-    @property
-    def sample_id(self) -> str:
-        return f"v{self.video_id:02d}_f{self.start_frame:05d}-{self.end_frame:05d}"
-    
-    @property
-    def num_frames(self) -> int:
-        return len(self.image_paths)
+from benchmark.frame_selectors import MultiFrameSample
 
 
 class TripletsFrameEvaluator:
@@ -64,90 +43,7 @@ class TripletsFrameEvaluator:
             device_map=config.device
         )
         print("✓ Model loaded")
-    
-    # TODO: the prompts should be part of the config, not hardcoded here -> seems to make more sense to have a
-    #  benchmark config for each task and initialize the dataclass from there rather than passing all as cmd line args
-    # TODO: if we do that, it would be clear which tasks are expected to be performed based on whether the appropriate config file
-    #  was provided on top of a base benchmarking config
 
-#     def _build_single_frame_prompt(self, gt_triplets: List[Dict]) -> str:
-#         """Build prompt for single-frame condition"""
-        
-#         # Get unique options from ground truth for this video
-#         instruments = sorted(set(t['instrument'] for t in gt_triplets))
-#         verbs = sorted(set(t['verb'] for t in gt_triplets))
-#         targets = sorted(set(t['target'] for t in gt_triplets))
-        
-#         # TODO: add the null instrument or however we call it when we handle the -1 exception case
-#         prompt = """You are an expert visceral surgeon analyzing a cholecystectomy image.
-
-# YOUR TASK: Identify instrument-verb-target triplets that are CURRENTLY ACTIVE and CLEARLY VISIBLE in this image.
-
-# CRITICAL RULES:
-# 1. ONLY report triplets where you can see BOTH the instrument AND the action occurring
-# 2. If an instrument is visible but NOT actively being used, do NOT report it
-# 3. If you cannot clearly identify what action is happening, output an empty triplet list
-# 4. DO NOT use words like: "appears", "seems", "likely", "possibly", "might be"
-# 5. DO NOT infer actions based on typical cholecystectomy procedures
-# 6. DO NOT speculate about what COULD be happening or what happened before/after
-# 7. An empty response {"triplets": []} is CORRECT if nothing is clearly active
-
-# VALID CATEGORIES:
-# "instrument": {"0": "grasper", "1": "bipolar", "2": "hook", "3": "scissors", "4": "clipper", "5": "irrigator"}
-# "verb": {"0": "grasp", "1": "retract", "2": "dissect", "3": "coagulate", "4": "clip", "5": "cut", "6": "aspirate", "7": "irrigate", "8": "pack", "9": "null_verb"}
-# "target": {"0": "gallbladder", "1": "cystic_plate", "2": "cystic_duct", "3": "cystic_artery", "4": "cystic_pedicle", "5": "blood_vessel", "6": "fluid", "7": "abdominal_wall_cavity", "8": "liver", "9": "adhesion", "10": "omentum", "11": "peritoneum", "12": "gut", "13": "specimen_bag", "14": "null_target"}
-
-# RESPONSE FORMAT:
-# First, describe ONLY what you definitively see (anatomy and instruments).
-# Then state your confidence level for each potential triplet.
-# Finally, output ONLY the triplets you are 100% confident about.
-
-# If uncertain, return: {"triplets": []}
-
-# Example of GOOD response:
-# "I can see a grasper firmly holding the gallbladder. No other active instrument interactions are visible."
-# {"triplets": [{"instrument": "grasper", "verb": "grasp", "target": "gallbladder"}]}
-
-# Example of BAD response:
-# "The bipolar appears to be near a vessel and might be coagulating it."
-# {"triplets": [{"instrument": "bipolar", "verb": "coagulate", "target": "blood_vessel"}]}
-
-# Output format:
-# {
-#   "triplets": [
-#     {"instrument": "...", "verb": "...", "target": "..."}
-#   ]
-# }
-# """
-        
-        # return prompt
-    
-#     def _build_multiframe_prompt(self, gt_triplets: List[Dict]) -> str:
-#         """Build prompt for multi-frame condition"""
-        
-#         instruments = sorted(set(t['instrument'] for t in gt_triplets))
-#         verbs = sorted(set(t['verb'] for t in gt_triplets))
-#         targets = sorted(set(t['target'] for t in gt_triplets))
-
-#         prompt = """You are an expert visceral surgeon analyzing a cholecystectomy video sequence.
-# YOUR TASK: Identify the TIMING of a given action.
-
-# CRITICAL RULES:
-# 1. ONLY report the timing of the action if you are 100% confident about it
-# 2. If you cannot clearly identify the timing of the action, output an empty response
-# 3. DO NOT use words like: "appears", "seems", "likely", "possibly", "might be"
-# 4. DO NOT infer actions based on typical cholecystectomy procedures
-# 5. DO NOT speculate about what COULD be happening or what happened before/after
-# 6. An empty response is CORRECT if nothing is clearly active
-
-# RESPONSE FORMAT:
-# First, describe ONLY what you definitively see (anatomy and instruments).
-# Then state your confidence level for the action.
-# Finally, output the timing of the action in the range that you are 100% confident about in the format: {{"begin": <frame number>, "end": <frame number>}}
-
-# The action to identify here is the grasper grasping the gallbladder. The grasper has to be clearly visible in the image.
-# """
-#         return prompt
     
     def _query_single_frame(self, image_path: Path, prompt: str) -> str:
         """Query model with a single frame"""
@@ -164,9 +60,7 @@ class TripletsFrameEvaluator:
         text = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        
-        # TODO: check if we need this custom impl here of if standard impl from qwen works
-        # image_inputs, video_inputs = self._process_vision_info(messages)
+
         print(f"image_paths: {image_path}")
         image_inputs, video_inputs = process_vision_info(messages)
         print(f"image_inputs: {image_inputs}")
@@ -211,12 +105,6 @@ class TripletsFrameEvaluator:
         print(f"image_paths: {image_paths}")
         image_inputs, video_inputs = process_vision_info(messages)
 
-        # # TODO: why are image_paths datatype path, potentially fix?
-        # print(f"image_paths: {image_paths}")
-        # # Convert path list to str list
-        # video_paths = [str(p) for p in image_paths]
-        # print(f"video_paths: {video_paths}")
-
         inputs = self.processor(
             text=[text],
             images=image_inputs,
@@ -241,7 +129,6 @@ class TripletsFrameEvaluator:
         
         return output_text
     
-    # TODO: have to look into this to see if it works as expected
     def _query_with_graph(self, image_paths: List[Path], graph_path: Path, prompt: str, system_prompt: str = None) -> str:
         """Query model with multiple frames AND scene graph"""
         
@@ -290,7 +177,6 @@ class TripletsFrameEvaluator:
             node_feats = [np.load(f) for f in feat_files]
             
             # Load spatial matrices
-            # TODO: this used to be called adjacency_matrices.npy, maybe this is graph.npy now? Not sure
             adjacency_matrices = np.load(clip_dir / "graph.npy")
             print(f"adjacency_matrices: {adjacency_matrices.shape}")
             centers = np.load(clip_dir / "c_centers.npy")
@@ -307,19 +193,6 @@ class TripletsFrameEvaluator:
         except Exception as e:
             print(f"Warning: Could not load graph data: {e}")
             return None
-    
-    # TODO: potentially remove, check first if needed
-    def _process_vision_info(self, messages):
-        """Process vision info from messages (helper from Qwen2.5-VL docs)"""
-        image_inputs, video_inputs = [], []
-        for message in messages:
-            if isinstance(message["content"], list):
-                for ele in message["content"]:
-                    if ele.get("type") == "image":
-                        image_inputs.append(ele["image"])
-                    elif ele.get("type") == "video":
-                        video_inputs.append(ele["video"])
-        return image_inputs if image_inputs else None, video_inputs if video_inputs else None
     
     def _parse_response(self, response: str) -> List[Dict]:
         """Parse model response to extract triplets"""
@@ -342,7 +215,7 @@ class TripletsFrameEvaluator:
     def evaluate_sample(
         self, 
         sample: MultiFrameSample, 
-        # TODO: have to change all of this; not a good way to do this
+        # TODO: have to change all of this; not a good way to do this (fix once we have more ablations)
         condition: str,
         prompt: str,
         system_prompt: str = None
@@ -367,7 +240,6 @@ class TripletsFrameEvaluator:
         elif condition == "multiframe_graph":
             if sample.graph_path is None:
                 print(f"Warning: No graph available for {sample.sample_id}, using multiframe")
-                # TODO: not actually using the graph here, fix this
                 response = self._query_multiframe(sample.image_paths[sample.start_frame:sample.end_frame + 1], prompt)
             else:
                 response = self._query_with_graph(
@@ -464,7 +336,6 @@ class TripletsFrameEvaluator:
             for i, sample in enumerate(samples, 1):
                 print(f"[{i}/{len(samples)}] {sample.sample_id}...")
                 
-                # TODO: evaluate the sample given the specific configuration
                 if ablation == "single_frame":
                     prompt = self.config.triplets_config['single_frame_prompt']
                     result = self.evaluate_sample(sample, ablation, prompt)
@@ -485,7 +356,7 @@ class TripletsFrameEvaluator:
                 status = "✓" if metrics['triplet'] else "✗"
                 print(f"  {status} I:{int(metrics['instrument'])} V:{int(metrics['verb'])} T:{int(metrics['target'])} Full:{int(metrics['triplet'])}")
             
-            # Compute aggregate metrics for this condition
+            # TODO: fix for quantitative metrics
             n = len(ablation_results)
             metrics = {
                 'instrument_acc': sum(r['metrics']['instrument'] for r in ablation_results) / n,
@@ -500,11 +371,11 @@ class TripletsFrameEvaluator:
                 'results': ablation_results
             }
             
-            print(f"\nCondition Metrics:")
-            print(f"  Instrument: {metrics['instrument_acc']:.1%}")
-            print(f"  Verb: {metrics['verb_acc']:.1%}")
-            print(f"  Target: {metrics['target_acc']:.1%}")
-            print(f"  Full Triplet: {metrics['triplet_acc']:.1%}")
+            # print(f"\nCondition Metrics:")
+            # print(f"  Instrument: {metrics['instrument_acc']:.1%}")
+            # print(f"  Verb: {metrics['verb_acc']:.1%}")
+            # print(f"  Target: {metrics['target_acc']:.1%}")
+            # print(f"  Full Triplet: {metrics['triplet_acc']:.1%}")
         
         return results
     

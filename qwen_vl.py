@@ -609,7 +609,7 @@ def prompt_with_graph(
         model=model,
         processor=processor,
         # TODO: increase this?
-        max_tokens=128,
+        max_tokens=5012,
     )
 
 
