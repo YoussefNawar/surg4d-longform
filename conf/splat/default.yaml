@@ -26,3 +26,5 @@ render_outputs:
 # environment variables
 language_feature_hiddendim: 6
 use_discrete_lang_f: f
+
+latent_cat_feat_subdir: ${autoencoder.latent_cat_feat_subdir}

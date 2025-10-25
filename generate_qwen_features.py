@@ -23,9 +23,9 @@ def extract_qwen_features(
     clip_dir = Path(cfg.preprocessed_root) / clip.name
     img_dir = clip_dir / "images"
     seg_dir = clip_dir / (
-        cfg.preprocessing.instance_mask_subdir
+        cfg.feature_extraction.instance_mask_subdir
         if cfg.feature_extraction.aggregate_with_instance_masks
-        else cfg.preprocessing.semantic_mask_subdir
+        else cfg.feature_extraction.semantic_mask_subdir
     )
     frame_stems = [f.stem for f in img_dir.glob("*.jpg")]
 

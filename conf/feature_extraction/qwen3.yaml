@@ -9,4 +9,7 @@ aggregate_with_instance_masks: true
 patch_feat_subdir: qwen_patch_features
 instance_feat_subdir: qwen_instance_features
 
+semantic_mask_subdir: ${preprocessing.semantic_mask_subdir}
+instance_mask_subdir: ${preprocessing.instance_mask_subdir}
+
 

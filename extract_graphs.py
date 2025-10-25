@@ -42,8 +42,8 @@ def load_gaussian_model(
     import os
 
     # Set up environment variables (needed for model architecture)
-    os.environ["language_feature_hiddendim"] = str(cfg.splat.language_feature_hiddendim)
-    os.environ["use_discrete_lang_f"] = cfg.splat.use_discrete_lang_f
+    os.environ["language_feature_hiddendim"] = str(cfg.graph_extraction.language_feature_hiddendim)
+    os.environ["use_discrete_lang_f"] = cfg.graph_extraction.use_discrete_lang_f
 
     clip_dir = Path(cfg.preprocessed_root) / clip.name
     model_path = Path(cfg.output_root) / clip.name
@@ -77,7 +77,7 @@ def load_gaussian_model(
     parser.add_argument("--store_verbose", action="store_true")
 
     # Build command line args
-    qwen_ae_path = clip_dir / cfg.autoencoder.checkpoint_subdir / "best_ckpt.pth"
+    qwen_ae_path = clip_dir / cfg.graph_extraction.checkpoint_subdir / "best_ckpt.pth"
 
     cmd_args = [
         "-s",
@@ -85,11 +85,11 @@ def load_gaussian_model(
         "--model_path",
         str(model_path),
         "--language_features_name",
-        cfg.autoencoder.latent_cat_feat_subdir,
+        cfg.graph_extraction.latent_cat_feat_subdir,
         "--feature_level",
         "0",
         "--configs",
-        cfg.splat.config_path,
+        cfg.graph_extraction.config_path,
         "--load_stage",
         cfg.graph_extraction.load_stage,
         "--iteration",
@@ -97,7 +97,7 @@ def load_gaussian_model(
         "--qwen_autoencoder_ckpt_path",
         str(qwen_ae_path),
         "--no_dlang",
-        "0" if cfg.splat.dynamic_language else "1",  # Pass dynamic language flag
+        "0" if cfg.graph_extraction.dynamic_language else "1",  # Pass dynamic language flag
     ]
 
     if cfg.graph_extraction.store_verbose:
@@ -362,11 +362,11 @@ def decode_qwen(lfs: torch.Tensor, cfg: DictConfig, clip: DictConfig) -> np.ndar
     BATCH_SIZE = cfg.graph_extraction.decode_batch_size
 
     clip_dir = Path(cfg.preprocessed_root) / clip.name
-    ae_path = clip_dir / cfg.autoencoder.checkpoint_subdir / "best_ckpt.pth"
+    ae_path = clip_dir / cfg.graph_extraction.checkpoint_subdir / "best_ckpt.pth"
 
     ae = QwenAutoencoder(
-        input_dim=cfg.autoencoder.full_dim,
-        latent_dim=cfg.autoencoder.latent_dim,
+        input_dim=cfg.graph_extraction.full_dim,
+        latent_dim=cfg.graph_extraction.latent_dim,
     ).to("cuda")
     ae.load_state_dict(torch.load(ae_path, map_location="cuda"))
     ae.eval()

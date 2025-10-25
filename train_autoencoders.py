@@ -23,8 +23,8 @@ def save_dim_reduced(clip: DictConfig, cfg: DictConfig):
     )
     ae.eval()
 
-    patch_dir = clip_dir / cfg.feature_extraction.patch_feat_subdir
-    instance_dir = clip_dir / cfg.feature_extraction.instance_feat_subdir
+    patch_dir = clip_dir / cfg.autoencoder.patch_feat_subdir
+    instance_dir = clip_dir / cfg.autoencoder.instance_feat_subdir
     reduced_patch_dir = clip_dir / cfg.autoencoder.latent_patch_feat_subdir
     reduced_instance_dir = clip_dir / cfg.autoencoder.latent_instance_feat_subdir
     reduced_cat_dir = clip_dir / cfg.autoencoder.latent_cat_feat_subdir
@@ -98,21 +98,12 @@ def train_ae(
     clip: DictConfig,
     cfg: DictConfig,
 ):
-    # Infer full_dim from use_qwen3 flag if needed
-    full_dim = cfg.autoencoder.full_dim
-    if cfg.feature_extraction.get("use_qwen3", True):
-        if full_dim == 3584:
-            full_dim = 4096
-    else:
-        if full_dim == 4096:
-            full_dim = 3584
-
     train(
         clip_path=str(Path(cfg.preprocessed_root) / clip.name),
         checkpoint_subdir=cfg.autoencoder.checkpoint_subdir,
         lf_dir_names=[
-            cfg.feature_extraction.patch_feat_subdir,
-            cfg.feature_extraction.instance_feat_subdir,
+            cfg.autoencoder.patch_feat_subdir,
+            cfg.autoencoder.instance_feat_subdir,
         ],
         epochs=cfg.autoencoder.epochs,
         lr=cfg.autoencoder.lr,

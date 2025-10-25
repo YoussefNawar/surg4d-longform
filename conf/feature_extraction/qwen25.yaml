@@ -8,3 +8,6 @@ instance_feat_subdir: qwen_instance_features
 
 use_qwen3: false
 model_id: Qwen/Qwen2.5-VL-7B-Instruct
+
+semantic_mask_subdir: ${preprocessing.semantic_mask_subdir}
+instance_mask_subdir: ${preprocessing.instance_mask_subdir}

@@ -8,3 +8,6 @@ lr: 1e-4
 batch_size: 256
 latent_dim: 3
 full_dim: 4096  # 4096 for Qwen3, 3584 for Qwen2.5
+
+patch_feat_subdir: ${feature_extraction.patch_feat_subdir}
+instance_feat_subdir: ${feature_extraction.instance_feat_subdir}
