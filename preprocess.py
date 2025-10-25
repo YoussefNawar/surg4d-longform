@@ -14,7 +14,7 @@ from vipe.utils.io import ArtifactPath
 from scripts.vipe_to_colmap_local import convert_vipe_to_colmap
 import zipfile
 from openexr_numpy import imread
-from scipy.ndimage import label
+import cv2
 
 from cholec_utils import get_clip_seg8k, parse_cholecseg8k_instance_mask
 import torch
@@ -142,9 +142,13 @@ def get_cholecseg8k_frames(clip: DictConfig, cfg: DictConfig):
         unique_classes = unique_classes[unique_classes != 0]
         for class_id in unique_classes:
             class_binary = (class_ids == class_id).astype(np.uint8)
-            labeled_components, num_components = label(class_binary)
-            for component_id in range(1, num_components + 1):
+            num_components, labeled_components = cv2.connectedComponents(class_binary, connectivity=8)
+            for component_id in range(1, num_components):  # cv2 starts at 1, 0 is background
                 component_mask = labeled_components == component_id
+                component_area = component_mask.sum()
+                # Filter out tiny components (noise)
+                if component_area < cfg.preprocessing.min_component_area:
+                    continue
                 instance_ids[component_mask] = instance_counter
                 instance_counter += 1
 

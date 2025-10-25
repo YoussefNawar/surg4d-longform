@@ -17,3 +17,5 @@ vipe_depth_step: 16 # stride for depth maps that end up in pointclouds, only use
 # Frame selection criteria for single depth projection (sorts by instance count first, then depth range as tie-breaker)
 
 verbose_output: false # keep intermediate output files (mostly vipe)
+
+min_component_area: 5 # minimum area of a component to be considered an instance
