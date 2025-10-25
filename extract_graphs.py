@@ -217,7 +217,9 @@ def cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
     # position
     pos_through_time = np.concatenate(
         [
-            normalize_dep_dim(deform_at_timestep(gaussians, t)[0])
+            normalize_indep_dim(
+                deform_at_timestep(gaussians, t)[0]
+            )
             for t in [0.0, 0.5, 1.0]
         ],
         axis=-1,
@@ -227,7 +229,7 @@ def cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
     # instance language features
     instance_features = gaussians.get_language_feature[:, 3:].detach().cpu().numpy()
     instance_features /= np.linalg.norm(instance_features, axis=-1, keepdims=True)
-    instance_features = normalize_indep_dim(instance_features)
+    instance_features = normalize_dep_dim(instance_features)
     instance_features /= 3
 
     clustering_feats = np.concatenate(
