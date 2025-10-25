@@ -40,7 +40,7 @@ def _get_qwen_loader(cfg) -> Callable[[], tuple]:
         return loader
 
 
-def main(cfg: DictConfig):
+def main():
     # do hydra init manually here to avoid conflicts with vipe hydra
     config_dir = Path(__file__).parent / "conf"
     with hydra.initialize_config_dir(
@@ -62,3 +62,6 @@ def main(cfg: DictConfig):
         train_ae(clip, cfg)
         train_splat(clip, cfg)
         extract_graph(clip, cfg)
+
+if __name__ == "__main__":
+    main()

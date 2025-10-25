@@ -1,8 +1,8 @@
 defaults:
-  - clips: dynamic_2grasper
+  - clips: t50_seg8k_intersection
   - preprocessing: default
-  - feature_extraction: default
-  - autoencoder: default
+  - feature_extraction: qwen25
+  - autoencoder: qwen25
   - splat: default
   - graph_extraction: default
   - _self_
@@ -10,8 +10,8 @@ defaults:
 cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k
 cholect50_root: data/cholect50
-preprocessed_root: data/preprocessed_dynamic_2grasper
-output_root: output/preprocessed_dynamic_2grasper/dl_${splat.dynamic_language}
+preprocessed_root: data/preprocessed_testlang
+output_root: output/testlang/dl_${splat.dynamic_language}
 
 hydra:
   job:
