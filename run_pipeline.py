@@ -8,6 +8,7 @@ from generate_qwen_features import extract_qwen_features
 from train_autoencoders import train_ae
 from train_splats import train_splat
 from extract_graphs import extract_graph
+from evaluate_benchmark import evaluate_clip
 
 
 import sys
@@ -62,6 +63,7 @@ def main():
         train_ae(clip, cfg)
         train_splat(clip, cfg)
         extract_graph(clip, cfg)
+        evaluate_clip(clip, cfg)
 
 if __name__ == "__main__":
     main()

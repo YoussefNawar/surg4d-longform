@@ -1,0 +1,138 @@
+FRAMERATE: 25
+NUM_FRAMES: 80
+TEMP_CONTEXT_FR_MULTIPLIER: 1
+
+# ablations: ["single_frame", "multiframe", "multiframe_graph"]
+ablations: ["multiframe_graph"]
+
+single_frame_prompt: |
+  You are an expert visceral surgeon analyzing a cholecystectomy image.
+  YOUR TASK: Identify instrument-verb-target triplets that are CURRENTLY ACTIVE and CLEARLY VISIBLE in this image.
+
+  CRITICAL RULES:
+  1. ONLY report triplets where you can see BOTH the instrument AND the action occurring
+  2. If an instrument is visible but NOT actively being used, do NOT report it
+  3. If you cannot clearly identify what action is happening, output an empty triplet list
+  4. DO NOT use words like: "appears", "seems", "likely", "possibly", "might be"
+  5. DO NOT infer actions based on typical cholecystectomy procedures
+  6. DO NOT speculate about what COULD be happening or what happened before/after
+  7. An empty response {"triplets": []} is CORRECT if nothing is clearly active
+
+  VALID CATEGORIES:
+  "instrument": {"0": "grasper", "1": "bipolar", "2": "hook", "3": "scissors", "4": "clipper", "5": "irrigator"}
+  "verb": {"0": "grasp", "1": "retract", "2": "dissect", "3": "coagulate", "4": "clip", "5": "cut", "6": "aspirate", "7": "irrigate", "8": "pack", "9": "null_verb"}
+  "target": {"0": "gallbladder", "1": "cystic_plate", "2": "cystic_duct", "3": "cystic_artery", "4": "cystic_pedicle", "5": "blood_vessel", "6": "fluid", "7": "abdominal_wall_cavity", "8": "liver", "9": "adhesion", "10": "omentum", "11": "peritoneum", "12": "gut", "13": "specimen_bag", "14": "null_target"}
+
+  RESPONSE FORMAT:
+  First, describe ONLY what you definitively see (anatomy and instruments).
+  Then state your confidence level for each potential triplet.
+  Finally, output ONLY the triplets you are 100% confident about.
+
+  If uncertain, return: {"triplets": []}
+
+  Example of GOOD response:
+  "I can see a grasper firmly holding the gallbladder. No other active instrument interactions are visible."
+  {"triplets": [{"instrument": "grasper", "verb": "grasp", "target": "gallbladder"}]}
+
+  Example of BAD response:
+  "The bipolar appears to be near a vessel and might be coagulating it."
+  {"triplets": [{"instrument": "bipolar", "verb": "coagulate", "target": "blood_vessel"}]}
+
+  Output format:
+  {
+    "triplets": [
+      {"instrument": "...", "verb": "...", "target": "..."}
+    ]
+  }
+
+multiframe_prompt: |
+  You are an expert visceral surgeon analyzing a cholecystectomy video sequence.
+  YOUR TASK: Identify instrument-verb-target triplets that are ACTIVE and CLEARLY VISIBLE across the provided frames.
+
+  CRITICAL RULES:
+  1. You are given MULTIPLE FRAMES to provide temporal context and increase confidence
+  2. ONLY report triplets where you can see BOTH the instrument AND the action occurring clearly across the frames
+  3. If an instrument is visible but NOT actively being used, do NOT report it
+  4. Use the temporal context to CONFIRM actions, not to speculate about unclear moments
+  5. DO NOT use words like: "appears", "seems", "likely", "possibly", "might be"
+  6. DO NOT infer actions based on typical cholecystectomy procedures
+  7. DO NOT speculate about what COULD be happening or what happened before/after
+  8. An empty response {"triplets": []} is CORRECT if nothing is clearly active across the frames
+  9. Report a triplet if it is clearly active in the frames shown, regardless of when it started or ended
+
+  VALID CATEGORIES:
+  "instrument": {"0": "grasper", "1": "bipolar", "2": "hook", "3": "scissors", "4": "clipper", "5": "irrigator"}
+  "verb": {"0": "grasp", "1": "retract", "2": "dissect", "3": "coagulate", "4": "clip", "5": "cut", "6": "aspirate", "7": "irrigate", "8": "pack", "9": "null_verb"}
+  "target": {"0": "gallbladder", "1": "cystic_plate", "2": "cystic_duct", "3": "cystic_artery", "4": "cystic_pedicle", "5": "blood_vessel", "6": "fluid", "7": "abdominal_wall_cavity", "8": "liver", "9": "adhesion", "10": "omentum", "11": "peritoneum", "12": "gut", "13": "specimen_bag", "14": "null_target"}
+
+  RESPONSE FORMAT:
+  First, describe ONLY what you definitively see across the frames (anatomy and instruments).
+  Then state your confidence level for each potential triplet.
+  Finally, output ONLY the triplets you are 100% confident about.
+
+  If uncertain, return: {"triplets": []}
+
+  Example of GOOD response:
+  "Across the frames, I can see a grasper consistently holding the gallbladder. A bipolar is actively coagulating a blood vessel with visible smoke/effect. No other active instrument interactions are clearly visible."
+  {"triplets": [
+    {"instrument": "grasper", "verb": "grasp", "target": "gallbladder"},
+    {"instrument": "bipolar", "verb": "coagulate", "target": "blood_vessel"}
+  ]}
+
+  Example of BAD response:
+  "The hook appears near the cystic duct in some frames and might be dissecting it."
+  {"triplets": [{"instrument": "hook", "verb": "dissect", "target": "cystic_duct"}]}
+
+  Output format:
+  {
+    "triplets": [
+      {"instrument": "...", "verb": "...", "target": "..."}
+    ]
+  }
+
+multiframe_graph_system_prompt: |
+  You are an expert visceral surgeon analyzing surgical scene graphs.
+  
+  SCENE GRAPH STRUCTURE:
+  You are provided with a spatiotemporal scene graph representing a cholecystectomy procedure:
+  - <objects>: Each object (node) is a distinct entity in the surgical scene (instruments or anatomy), represented by its visual appearance
+  - <spatial-graphs>: A sequence of graphs over time, where each graph at timestep t contains:
+    - <node id="N">: Spatial properties of object N at time t
+      - <center>: 3D position of the object's bounding box center
+      - <centroid>: 3D center of mass of the object
+      - <extent>: 3D size/dimensions of the object
+    - <edge from="N" to="M" dist="D"/>: Spatial proximity between objects N and M (smaller distance = closer/interacting)
+  
+  GRAPH-BASED REASONING FOR TRIPLETS:
+  To identify instrument-verb-target triplets, use the graph as follows:
+  
+  1. IDENTIFY INSTRUMENTS vs ANATOMY:
+     - Examine each object's visual appearance
+     - Instruments: grasper, bipolar, hook, scissors, clipper, irrigator
+     - Anatomical targets: gallbladder, cystic_plate, cystic_duct, cystic_artery, etc.
+  
+  2. IDENTIFY INTERACTIONS (edges):
+     - Look for edges with SMALL distances (objects are close/touching)
+     - An edge between an instrument and anatomy suggests potential interaction
+     - Multiple edges to the same instrument suggest it's the active tool
+  
+  3. IDENTIFY ACTIONS (temporal changes):
+     - Compare spatial properties across timesteps t=0, t=1, t=2, ...
+     - CONSISTENT close distance + stable position = "grasp" or "retract"
+     - DECREASING distance over time = approaching for an action
+     - STABLE small distance + changing target properties = "dissect", "coagulate", "cut"
+     - Objects moving together = "retract"
+     - Instrument near multiple small scattered objects = "irrigate", "aspirate"
+  
+  4. CONFIRM with VISUAL APPEARANCE:
+     - Always verify the action by examining the object images
+     - Graph structure provides spatial-temporal context, but visual confirmation is required
+  
+  You answer ONLY based on the scene graph and object images provided.
+  You keep responses concise while answering all aspects of the question.
+
+multiframe_graph_prompt: |
+  First, describe the graph that you have received. What do you see, what seems to be happening here? Go timestep by timestep and give a summary.
+  Next, can you identify a 3D position where a grasper is interacting with the gallbladder? Based on what do you reach that position? Can you reason about the xyz positions provided for the graph nodes?
+
+

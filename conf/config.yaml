@@ -5,6 +5,7 @@ defaults:
   - autoencoder: qwen25
   - splat: default
   - graph_extraction: default
+  - eval: default
   - _self_
 
 cholec80_root: data/cholec80

@@ -1,0 +1,19 @@
+multiframe_prompt: |
+  You are an expert visceral surgeon analyzing a cholecystectomy video sequence.
+  YOUR TASK: Identify the TIMING of a given action.
+
+  CRITICAL RULES:
+  1. ONLY report the timing of the action if you are 100% confident about it
+  2. If you cannot clearly identify the timing of the action, output an empty response
+  3. DO NOT use words like: "appears", "seems", "likely", "possibly", "might be"
+  4. DO NOT infer actions based on typical cholecystectomy procedures
+  5. DO NOT speculate about what COULD be happening or what happened before/after
+  6. An empty response is CORRECT if nothing is clearly active
+
+  RESPONSE FORMAT:
+  First, describe ONLY what you definitively see (anatomy and instruments).
+  Then state your confidence level for the action.
+  Finally, output the timing of the action in the range that you are 100% confident about in the format: {{"begin": <frame number>, "end": <frame number>}}
+
+  The action to identify here is the grasper grasping the gallbladder. The grasper has to be clearly visible in the image.
+
