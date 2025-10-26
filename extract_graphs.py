@@ -11,8 +11,9 @@ import random
 import hydra
 from omegaconf import DictConfig
 from tqdm import tqdm
-from typing import List
+from typing import List, Optional, Tuple
 import gc
+import copy
 
 from scene.cameras import Camera
 from utils.params_utils import merge_hparams
@@ -20,6 +21,7 @@ from arguments import ModelParams, PipelineParams, ModelHiddenParams
 from cluster_utils import store_palette, clusters_to_rgb
 from scene import GaussianModel, Scene
 from gaussian_renderer import render as gs_render
+from gaussian_renderer import render_opacity as gs_render_opacity
 from utils.sh_utils import RGB2SH
 from autoencoder.model_qwen import QwenAutoencoder
 from rerun_utils import (
@@ -337,6 +339,210 @@ def render_and_save_all(
             torchvision.utils.save_image(img, cam_dir / f"timestep_{j:02d}.png")
 
 
+def compute_iou(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    """IoU = |A ∩ B| / |A ∪ B| for boolean masks of same shape."""
+    inter = np.logical_and(mask_a, mask_b).sum()
+    union = np.logical_or(mask_a, mask_b).sum()
+    if union == 0:
+        return 0.0
+    return float(inter) / float(union)
+
+
+def compute_mask_coverage(cluster_mask: np.ndarray, instance_mask: np.ndarray) -> float:
+    """Coverage = |cluster ∩ instance| / |instance|, clipped at 1.0.
+
+    Both masks are expected to be the same shape as they originate from the same frame.
+    """
+    inter = np.logical_and(cluster_mask, instance_mask).sum()
+    denom = instance_mask.sum()
+    if denom == 0:
+        return 0.0
+    ratio = float(inter) / float(denom)
+    return min(ratio, 1.0)
+
+
+# Instance mask paths are mapped deterministically from frame indices: frame_{idx:06d}.npy
+
+
+def _render_cluster_binary_mask(
+    gaussians: GaussianModel,
+    cluster_mask_tensor: torch.Tensor,
+    cam: Camera,
+    pipe: PipelineParams,
+    args: argparse.Namespace,
+    dataset: ModelParams,
+) -> np.ndarray:
+    """Render a single cluster to a binary mask via opacity rendering (>0)."""
+    # Use a shallow copy to avoid PyTorch tensor deepcopy limitations while
+    # allowing us to swap tensor attributes on the copy only.
+    g_copy: GaussianModel = copy.copy(gaussians)
+    filter_gaussians(g_copy, cluster_mask_tensor)
+
+    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
+    background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+    pkg = gs_render_opacity(
+        cam,
+        g_copy,
+        pipe,
+        background,
+        None,
+        stage=args.load_stage,
+        cam_type=None,
+        args=args,
+    )
+    # render_opacity returns a tensor directly (C,H,W). Not a dict.
+    img = torch.clamp(pkg, 0.0, 1.0)
+    mask = (img.sum(dim=0) > 0).detach().cpu().numpy()
+    return mask
+
+
+def filter_clusters_by_masks(
+    gaussians: GaussianModel,
+    clusters: np.ndarray,
+    scene: Scene,
+    args: argparse.Namespace,
+    dataset: ModelParams,
+    pipe: PipelineParams,
+    cfg: DictConfig,
+    clip: DictConfig,
+) -> np.ndarray:
+    """Filter clusters by comparing rendered cluster masks to instance masks.
+
+    Metric is controlled by cfg.graph_extraction.mask_filtering.metric (coverage|iou).
+    Threshold by cfg.graph_extraction.mask_filtering.threshold.
+    """
+    unique_ids = [cid for cid in np.unique(clusters) if cid >= 0]
+    if len(unique_ids) == 0:
+        return clusters
+
+    clip_dir = Path(cfg.preprocessed_root) / clip.name
+    mask_subdir = cfg.graph_extraction.mask_filtering.mask_subdir
+    mask_dir = clip_dir / mask_subdir
+    if not mask_dir.exists():
+        logger.warning(
+            f"Instance mask directory not found: {mask_dir}; skipping mask-based filtering."
+        )
+        return clusters
+
+    video_cams = scene.getVideoCameras()
+    total_views = len(video_cams)
+    if total_views == 0:
+        logger.warning("No video cameras available; skipping mask-based filtering.")
+        return clusters
+
+    n_timesteps = int(cfg.graph_extraction.n_timesteps)
+    timesteps = np.linspace(0, 1, n_timesteps, dtype=np.float32)
+
+    cams_and_maskpaths: List[Tuple[Camera, Optional[Path]]] = []
+    for t in timesteps:
+        idx = int(round(t * max(0, total_views - 1)))
+        cam = video_cams[idx]
+        # Expect standard naming: frame_{idx:06d}.npy
+        mask_path = mask_dir / f"frame_{idx:06d}.npy"
+        if not mask_path.exists():
+            logger.warning(
+                f"Missing instance mask for frame index {idx:06d} at {mask_path}; skipping mask-based filtering."
+            )
+            return clusters
+        cams_and_maskpaths.append((cam, mask_path))
+
+    metric = str(cfg.graph_extraction.mask_filtering.metric).lower()
+    threshold = float(cfg.graph_extraction.mask_filtering.threshold)
+    min_area = int(cfg.graph_extraction.mask_filtering.min_component_area)
+
+    keep_cluster: dict[int, bool] = {}
+    for cid in unique_ids:
+        cid_mask = torch.tensor(clusters == cid, device="cuda")
+        consistent = True
+        matched_instance_id: Optional[int] = None
+
+        for cam, mask_path in cams_and_maskpaths:
+            cluster_mask = _render_cluster_binary_mask(
+                gaussians, cid_mask, cam, pipe, args, dataset
+            )
+            if cluster_mask.sum() == 0:
+                consistent = False
+                break
+
+            # Load instance masks from .npy: expect 2D labelmap or 3D stack
+            if not mask_path.exists():
+                consistent = False
+                break
+            arr = np.load(str(mask_path), allow_pickle=True)
+            if arr.dtype == object:
+                try:
+                    obj = arr.item()
+                    if isinstance(obj, dict):
+                        if "masks" in obj:
+                            arr = obj["masks"]
+                        elif "instances" in obj:
+                            arr = obj["instances"]
+                except Exception:
+                    pass
+
+            instance_masks: List[np.ndarray] = []
+            if arr.ndim == 2:
+                labels = arr
+                for v in np.unique(labels):
+                    if v == 0:
+                        continue
+                    m = labels == v
+                    if m.sum() >= min_area:
+                        instance_masks.append(m)
+            elif arr.ndim == 3:
+                axis = int(np.argmin(arr.shape))
+                if axis == 0:
+                    it = [arr[i] for i in range(arr.shape[0])]
+                elif axis == 2:
+                    it = [arr[..., i] for i in range(arr.shape[2])]
+                else:
+                    it = [arr[:, i, :] for i in range(arr.shape[1])]
+                for a in it:
+                    m = a > 0
+                    if m.sum() >= min_area:
+                        instance_masks.append(m)
+            if not instance_masks:
+                consistent = False
+                break
+
+            if metric == "iou":
+                scores = [compute_iou(cluster_mask, m) for m in instance_masks]
+            else:
+                scores = [
+                    compute_mask_coverage(cluster_mask, m) for m in instance_masks
+                ]
+
+            best_idx = int(np.argmax(scores)) if scores else -1
+            best_score = scores[best_idx] if best_idx >= 0 else 0.0
+            if best_score < threshold:
+                consistent = False
+                break
+
+            if matched_instance_id is None:
+                matched_instance_id = best_idx
+            elif matched_instance_id != best_idx:
+                consistent = False
+                break
+
+        keep_cluster[cid] = consistent
+
+    # Remap kept clusters to contiguous ids, filtered to -1
+    new_id_map: dict[int, int] = {}
+    next_id = 0
+    for cid in sorted(unique_ids):
+        if keep_cluster.get(cid, False):
+            new_id_map[cid] = next_id
+            next_id += 1
+        else:
+            new_id_map[cid] = -1
+
+    new_clusters = clusters.copy()
+    for i, c in enumerate(new_clusters):
+        new_clusters[i] = new_id_map.get(c, -1)
+
+    return new_clusters
+
+
 def bhattacharyya_coefficient(mu1, Sigma1, mu2, Sigma2):
     mu1, mu2 = np.asarray(mu1), np.asarray(mu2)
     Sigma1, Sigma2 = np.asarray(Sigma1), np.asarray(Sigma2)
@@ -571,9 +777,28 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     ).squeeze()
     filter_gaussians(gaussians, opacity_mask & inst_feat_norm_mask)
 
-    # Cluster, filter clusters, filter gaussians that are not in a cluster
+    # Cluster, filter clusters, optional mask-based filtering, then drop -1s
     clusters = cluster_gaussians(gaussians, cfg=cfg)
     filter_clusters(clusters, cfg)
+
+    # Optional: mask-based cluster filtering (coverage or IoU)
+    mf = getattr(cfg.graph_extraction, "mask_filtering", None)
+    if mf and bool(mf.get("enabled", False)):
+        logger.info(
+            "Applying mask-based cluster filtering (%s, threshold=%.3f)",
+            mf.metric,
+            mf.threshold,
+        )
+        clusters = filter_clusters_by_masks(
+            gaussians=gaussians,
+            clusters=clusters,
+            scene=scene,
+            args=args,
+            dataset=dataset,
+            pipe=pipeline,
+            cfg=cfg,
+            clip=clip,
+        )
     cluster_mask = clusters >= 0
     filter_gaussians(gaussians, cluster_mask)
     clusters = clusters[cluster_mask]

@@ -45,3 +45,12 @@ latent_cat_feat_subdir: ${splat.latent_cat_feat_subdir}
 checkpoint_subdir: ${autoencoder.checkpoint_subdir}
 full_dim: ${autoencoder.full_dim}
 latent_dim: ${autoencoder.latent_dim}
+
+# Mask-based cluster filtering of clusters by comparing rendered cluster masks
+# against precomputed instance masks in the preprocessed clip directory.
+mask_filtering:
+  enabled: false           # disabled by default; enable to filter clusters by masks
+  metric: coverage         # one of: [coverage, iou]
+  threshold: 0.8           # minimum required score for the chosen metric
+  mask_subdir: instance_masks  # relative to {preprocessed_root}/{clip.name}
+  min_component_area: 50   # ignore tiny connected components in instance masks
