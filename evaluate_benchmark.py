@@ -69,6 +69,10 @@ def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfi
 
 
 def evaluate_triplets(clip: DictConfig, cfg: DictConfig):
+    # skip this if no eval config is set
+    if cfg.eval is None or cfg.eval.triplets is None:
+        return
+
     bench_cfg = _build_benchmark_config(cfg, clip)
     selector = TripletsFrameSelector(bench_cfg)
     samples = selector.select_sequences()
@@ -92,10 +96,13 @@ def evaluate_triplets(clip: DictConfig, cfg: DictConfig):
 
 
 def evaluate_temporal(clip: DictConfig, cfg: DictConfig):
+    # skip this if no eval config is set
+    if cfg.eval is None or cfg.eval.temporal is None:
+        return
     pass
 
 
-def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
+def evaluate_spatial(clip: DictConfig, cfg: DictConfig, model, processor):
     """Compute text-to-vision attention over sampled scene points and log heatmaps to rerun.
 
     Expects graph extraction outputs to exist under output_root/<clip.name>/<graph_subdir>:
@@ -111,7 +118,15 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
       - substring: substring to select query tokens for
       - timestep: integer index into T for which features to use
       - colormap: optional matplotlib colormap name (default 'jet')
+
+    Args:
+      model: Pre-loaded patched qwen model for spatial grounding
+      processor: Pre-loaded qwen processor
     """
+    # skip this if no eval config is set
+    if cfg.eval is None or cfg.eval.spatial is None:
+        return
+
     bench_cfg = _build_benchmark_config(cfg, clip)
     spatial_cfg = bench_cfg.spatial_config
     assert spatial_cfg is not None, "cfg.eval.spatial must be provided"
@@ -143,16 +158,10 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
     timestep = int(spatial_cfg["timestep"])
     cmap_name = str(spatial_cfg["colormap"])  # required
 
-    assert 0 <= timestep < T, f"Invalid timestep {timestep}; valid range [0,{T-1}]"
+    assert 0 <= timestep < T, f"Invalid timestep {timestep}; valid range [0,{T - 1}]"
 
     # Prepare vision features for the timestep
     vision_features = torch.tensor(splat_feats[timestep], dtype=torch.float32)
-
-    # Load patched model with attentions enabled
-    use_4bit = bench_cfg.use_4bit_quantization
-    model, processor = get_patched_qwen_for_spatial_grounding(
-        use_bnb_4bit=use_4bit, use_bnb_8bit=False
-    )
 
     # Compute attentions
     attn_out = extract_text_to_vision_attention(
@@ -195,22 +204,30 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
     )
 
 
-def evaluate_clip(clip: DictConfig, cfg: DictConfig):
-    """Run benchmark evaluations for a single clip using Hydra configs."""
-    if cfg.eval.triplets is not None:
-        evaluate_triplets(clip, cfg)
-
-    if cfg.eval.temporal is not None:
-        evaluate_temporal(clip, cfg)
-
-    if cfg.eval.spatial is not None:
-        evaluate_spatial(clip, cfg)
-
-
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")
 def main(cfg: DictConfig):
-    for clip in tqdm(cfg.clips, desc="Evaluating clips", unit="clip"):
-        evaluate_clip(clip, cfg)
+    # triplets
+    for clip in tqdm(cfg.clips, desc="Evaluating triplets", unit="clip"):
+        evaluate_triplets(clip, cfg)
+
+    # temporal
+    for clip in tqdm(cfg.clips, desc="Evaluating temporal", unit="clip"):
+        evaluate_temporal(clip, cfg)
+
+    # spatial
+    if cfg.eval is not None and cfg.eval.spatial is not None:
+        # we cannot reuse the models from tiplet etc. because attention maps
+        # don't work with flash attention implementations
+        model_spatial, processor_spatial = get_patched_qwen_for_spatial_grounding(
+            use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
+            use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
+        )
+    for clip in tqdm(cfg.clips, desc="Evaluating spatial", unit="clip"):
+        evaluate_spatial(clip, cfg, model_spatial, processor_spatial)
+    if model_spatial is not None:
+        del model_spatial
+        del processor_spatial
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ import os
 from tqdm import tqdm
 from argparse import ArgumentParser
 import time as time_module  # Rename to avoid collision with train.py's "from time import time"
+import gc
+import torch
 
 from arguments import ModelParams, PipelineParams, ModelHiddenParams, OptimizationParams
 from utils.params_utils import merge_hparams
@@ -169,6 +171,10 @@ def train_splat(clip: DictConfig, cfg: DictConfig):
     for stage_key, stage_name in stage_map.items():
         if cfg.splat.render_outputs.get(stage_key, False):
             render_splat(clip, cfg, args.model_path, stage_name)
+    
+    # Clean up GPU memory after training
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def render_splat(clip: DictConfig, cfg: DictConfig, model_path: str, stage: str):
@@ -276,6 +282,10 @@ def render_splat(clip: DictConfig, cfg: DictConfig, model_path: str, stage: str)
             args.mode,
             args,
         )
+        
+        # Clean up GPU memory after rendering
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")

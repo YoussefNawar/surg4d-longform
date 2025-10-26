@@ -12,6 +12,7 @@ import hydra
 from omegaconf import DictConfig
 from tqdm import tqdm
 from typing import List
+import gc
 
 from scene.cameras import Camera
 from utils.params_utils import merge_hparams
@@ -701,6 +702,15 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         cluster_pos_through_time=cluster_pos_through_time,
         graphs_through_time=graphs,
     )
+
+    # Clean up GPU memory - this is critical before evaluate_clip tries to load Qwen
+    del gaussians
+    del scene
+    del dataset
+    del args
+    del pipeline
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")

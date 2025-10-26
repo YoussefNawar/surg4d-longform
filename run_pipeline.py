@@ -1,14 +1,17 @@
 import hydra
 from hydra.core.global_hydra import GlobalHydra
-from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
+from omegaconf import OmegaConf
+import torch
+import gc
 
+from benchmark.spatial import get_patched_qwen_for_spatial_grounding
 from preprocess import process_clip
 from generate_qwen_features import extract_qwen_features
 from train_autoencoders import train_ae
 from train_splats import train_splat
 from extract_graphs import extract_graph
-from evaluate_benchmark import evaluate_clip
+from evaluate_benchmark import evaluate_triplets, evaluate_temporal, evaluate_spatial
 
 
 import sys
@@ -57,17 +60,74 @@ def main():
         Path(config_dump).parent.mkdir(parents=True, exist_ok=True)
         OmegaConf.save(cfg, config_dump)
 
-    for clip in cfg.clips:
-        process_clip(clip, cfg)
-        get_patched = _get_qwen_loader(cfg)
+    if cfg.whole_pipeline_clips_sequentially:
+        for clip in cfg.clips:
+            process_clip(clip, cfg)
+            get_patched = _get_qwen_loader(cfg)
+
+            model, processor = get_patched()
+            extract_qwen_features(clip, cfg, model, processor)
+            del model
+            del processor
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            train_ae(clip, cfg)
+            train_splat(clip, cfg)
+            extract_graph(clip, cfg)
+
+            # TODO pass model and processor from outside
+            evaluate_triplets(clip, cfg)
+            evaluate_temporal(clip, cfg)
+
+            model_spatial, processor_spatial = get_patched_qwen_for_spatial_grounding(
+                use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
+                use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
+            )
+            evaluate_spatial(clip, cfg, model_spatial, processor_spatial)
+            del model_spatial
+            del processor_spatial
+            gc.collect()
+            torch.cuda.empty_cache()
+
+    else:
+        for clip in cfg.clips:
+            process_clip(clip, cfg)
+
+        get_patched = _get_qwen_loader(cfg) 
         model, processor = get_patched()
-        extract_qwen_features(clip, cfg, model, processor)
+        for clip in cfg.clips:
+            extract_qwen_features(clip, cfg, model, processor)
         del model
         del processor
-        train_ae(clip, cfg)
-        train_splat(clip, cfg)
-        extract_graph(clip, cfg)
-        evaluate_clip(clip, cfg)
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for clip in cfg.clips:
+            train_ae(clip, cfg)
+        for clip in cfg.clips:
+            train_splat(clip, cfg)
+        for clip in cfg.clips:
+            extract_graph(clip, cfg)
+
+        # triplets and temporal eval
+        # TODO pass model and processor from outside
+        for clip in cfg.clips:
+            evaluate_triplets(clip, cfg)
+        for clip in cfg.clips:
+            evaluate_temporal(clip, cfg)
+
+        # spatial eval
+        model_spatial, processor_spatial = get_patched_qwen_for_spatial_grounding(
+            use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
+            use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
+        )
+        for clip in cfg.clips:
+            evaluate_spatial(clip, cfg, model_spatial, processor_spatial)
+        del model_spatial
+        del processor_spatial
+        gc.collect()
+        torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     main()

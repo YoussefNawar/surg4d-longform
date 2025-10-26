@@ -7,6 +7,7 @@ import hydra
 from hydra.core.global_hydra import GlobalHydra
 import subprocess
 import shutil
+import torch
 from vipe import make_pipeline
 from vipe.streams.base import ProcessedVideoStream
 from vipe.streams.frame_dir_stream import FrameDirStream
@@ -185,6 +186,12 @@ def vipe(clip: DictConfig, cfg: DictConfig):
     )
 
     pipeline.run(video_stream)
+    
+    # Clean up GPU memory from VIPE pipeline
+    del pipeline
+    del video_stream
+    torch.cuda.empty_cache()
+    
     GlobalHydra.instance().clear()
 
 
