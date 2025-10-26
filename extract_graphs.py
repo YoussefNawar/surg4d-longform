@@ -525,7 +525,7 @@ def cluster_spatial_grounding_feats(
         cluster_mask = clusters == cluster_id
         indices = np.random.choice(
             np.arange(cluster_mask.sum()),
-            max(
+            min(
                 cluster_mask.sum(),
                 cfg.graph_extraction.spatial_grounding.n_cluster_points,
             ),
