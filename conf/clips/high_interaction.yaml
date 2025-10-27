@@ -3,4 +3,3 @@
   first_frame: 16345
   last_frame: 16425
   frame_stride: 1
-  temporal_eval_file: data/temporal_annotations/video01_16345_temporal.json

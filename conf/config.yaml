@@ -18,8 +18,8 @@ skip_eval: true
 cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k
 cholect50_root: data/cholect50
-preprocessed_root: data/multiple
-output_root: output/multiple
+preprocessed_root: data/scene_good_on_qwen2_5
+output_root: output/scene_good_on_qwen2_5
 
 config_dumps:
   - ${output_root}/config.yaml

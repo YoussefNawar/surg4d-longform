@@ -134,12 +134,12 @@ class TripletsFrameEvaluator:
         
         # Load graph data
         graph_data = self._load_graph_data(graph_path)
-
-        print(f"shape of node_feats: {len(graph_data['node_feats'])}")
         
         if graph_data is None:
             # Fallback to multiframe without graph
             return self._query_multiframe(image_paths, prompt)
+
+        print(f"shape of node_feats: {len(graph_data['node_feats'])}")
         
         # Use existing prompt_with_graph from qwen_vl.py
         response = prompt_with_graph(

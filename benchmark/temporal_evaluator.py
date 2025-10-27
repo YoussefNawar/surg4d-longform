@@ -31,9 +31,19 @@ class TemporalFrameEvaluator:
         self.config = config
         self.temporal_cfg = config.temporal_config
         
-        # Load video frames
-        self.video_frames = sorted(list(config.video_dir.glob("images/*.jpg")))
-        self.num_frames = len(self.video_frames)
+        # Load video frames using configured images subdirectory
+        images_dir = config.video_dir / config.images_subdir
+        if not images_dir.exists():
+            print(f"ERROR: Images directory not found: {images_dir}")
+            print(f"Expected structure: {config.video_dir}/{config.images_subdir}/")
+            self.video_frames = []
+            self.num_frames = 0
+        else:
+            self.video_frames = sorted(list(images_dir.glob("*.jpg")))
+            self.num_frames = len(self.video_frames)
+            if self.num_frames == 0:
+                print(f"ERROR: No .jpg images found in {images_dir}")
+        
         self.graph_path = config.graph_dir
         
         print(f"Loaded {self.num_frames} frames from {config.video_dir}")
@@ -95,6 +105,16 @@ class TemporalFrameEvaluator:
         Returns:
             Results dictionary with per-ablation and per-query results
         """
+        # Check if frames were loaded successfully
+        if self.num_frames == 0:
+            print("ERROR: No frames available for temporal evaluation. Cannot proceed.")
+            print("Please check that the images directory exists and contains .jpg files.")
+            return {
+                'ablations': {},
+                'per_query_results': [],
+                'error': 'No frames loaded'
+            }
+        
         results = {
             'ablations': {},
             'per_query_results': []
@@ -176,7 +196,7 @@ class TemporalFrameEvaluator:
         # Stage 3: Evaluate
         evaluator = self.evaluators[query_type]
         metrics = evaluator(predicted, query_annotation['ground_truth'], query_type)
-        print(f"  Ground Truth: {query_annotation['ground_truth']}\n\n")
+        print(f"  Ground Truth: {query_annotation['ground_truth']}")
         return {
             'query_id': query_annotation['query_id'],
             'query_type': query_type,
@@ -245,7 +265,6 @@ class TemporalFrameEvaluator:
     
     def _query_multiframe(self, image_paths: List[Path], prompt: str) -> str:
         """Query model with multiple frames (video)"""
-        print(f"\n  DEBUG: Passing {len(image_paths)} frames to model")
         
         content = []
         content.append({"type": "video", "video": [str(p) for p in image_paths]})
@@ -258,9 +277,6 @@ class TemporalFrameEvaluator:
         )
         
         image_inputs, video_inputs = process_vision_info(messages)
-        print(f"  DEBUG: process_vision_info returned {len(video_inputs) if video_inputs else 0} video sequences")
-        if video_inputs:
-            print(f"  DEBUG: First video has {len(video_inputs[0])} frames after processing")
         
         inputs = self.processor(
             text=[text],
@@ -269,12 +285,6 @@ class TemporalFrameEvaluator:
             padding=True,
             return_tensors="pt",
         )
-        
-        # Check the actual video grid shape
-        if 'video_grid_thw' in inputs:
-            print(f"  DEBUG: video_grid_thw shape: {inputs['video_grid_thw']}")
-            print(f"  DEBUG: Temporal dimension (num frames actually used): {inputs['video_grid_thw'][0][0].item()}")
-        
         inputs = inputs.to(self.model.device)
         
         generated_ids = self.model.generate(**inputs, max_new_tokens=2048)
@@ -830,24 +840,24 @@ class TemporalFrameEvaluator:
         if qtype in ['action_onset', 'action_offset']:
             status = "✓" if metrics['success'] else "✗"
             print(f"  {status} Frame error: {metrics['frame_error']} "
-                  f"(tolerance: {metrics['tolerance_used']})")
+                  f"(tolerance: {metrics['tolerance_used']})\n\n")
         
         elif qtype == 'action_duration':
             status = "✓" if metrics['success'] else "✗"
             print(f"  {status} IoU: {metrics['iou']:.3f} "
-                  f"(threshold: {metrics['threshold']})")
+                  f"(threshold: {metrics['threshold']})\n\n")
         
         elif qtype == 'multiple_event_ordering':
             status = "✓" if metrics['success'] else "✗"
             print(f"  {status} Composite: {metrics['composite_score']:.3f}, "
                   f"Order: {metrics['order_correct']}, "
-                  f"Mean IoU: {metrics['mean_iou']:.3f}")
+                  f"Mean IoU: {metrics['mean_iou']:.3f}\n\n")
         
         elif qtype == 'count_frequency':
             status = "✓" if metrics['success'] else "✗"
             print(f"  {status} Composite: {metrics['composite_score']:.3f}, "
                   f"Count: {metrics['pred_count']}/{metrics['gt_count']}, "
-                  f"Mean IoU: {metrics['mean_iou']:.3f}")
+                  f"Mean IoU: {metrics['mean_iou']:.3f}\n\n")
     
     def _print_aggregated_metrics(self, aggregated: Dict):
         """Print aggregated metrics per category"""

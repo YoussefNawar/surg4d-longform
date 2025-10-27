@@ -78,9 +78,19 @@ class TripletsFrameSelector:
         clip_dir = self.config.video_dir
             
         # Get image paths for selected frames
-        image_paths = []
-        # image paths are all images in the clip directory
-        image_paths = list(sorted(Path(os.path.join(clip_dir, "images")).glob("*.jpg")))
+        # Use configured images subdirectory
+        images_dir = clip_dir / self.config.images_subdir
+        if not images_dir.exists():
+            print(f"ERROR: Images directory not found: {images_dir}")
+            print(f"Expected structure: {clip_dir}/{self.config.images_subdir}/")
+            return []
+        
+        image_paths = list(sorted(images_dir.glob("*.jpg")))
+        if not image_paths:
+            print(f"ERROR: No .jpg images found in {images_dir}")
+            return []
+        
+        print(f"Found {len(image_paths)} images in {images_dir}")
         print(f"first 10 image_paths: {image_paths[:10]}")
 
         samples = []

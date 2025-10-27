@@ -29,6 +29,10 @@ class BenchmarkConfig:
     video_dir: Path = preprocessed_root / "video01_00080"
     graph_dir: Path = output_root / "video01_00080/graph"
     
+    # Path structure configuration (subdirectories)
+    images_subdir: str = "images"  # Subdirectory within video_dir containing images
+    graph_subdir: str = "graph"    # Subdirectory within output clip dir containing graph data
+    
     # Model settings
     model_name: Literal["qwen", "gpt4"] = "qwen"
     qwen_version: Literal["qwen2.5", "qwen3"] = "qwen2.5"  # Differentiate between Qwen versions

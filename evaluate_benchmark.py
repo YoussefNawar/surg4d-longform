@@ -44,7 +44,15 @@ def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfi
 
     clip_name = str(clip.name)
     video_dir = preprocessed_root / clip_name
-    graph_dir = output_root / clip_name / "graph"
+
+    # Get path configuration from eval config (with defaults)
+    images_subdir = "images"
+    graph_subdir = "graph"
+    if cfg.get("eval") is not None and cfg.eval.get("paths") is not None:
+        images_subdir = cfg.eval.paths.get("images_subdir", "images")
+        graph_subdir = cfg.eval.paths.get("graph_subdir", "graph")
+
+    graph_dir = output_root / clip_name / graph_subdir
 
     # Convert nested eval configs (OmegaConf) to plain dicts
     triplets_cfg = None
@@ -71,6 +79,8 @@ def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfi
         results_dir=output_root / "benchmark",
         video_dir=video_dir,
         graph_dir=graph_dir,
+        images_subdir=images_subdir,
+        graph_subdir=graph_subdir,
         model_name="qwen",
         qwen_version=qwen_version,
         use_4bit_quantization=use_4bit,
@@ -81,19 +91,24 @@ def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfi
 def evaluate_triplets(clip: DictConfig, cfg: DictConfig):
     """Run triplet recognition evaluation for a single clip."""
     bench_cfg = _build_benchmark_config(cfg, clip)
-
-    # =========================================================================
-    # TRIPLETS EVALUATION
-    # =========================================================================
-    if bench_cfg.triplets_config is None:
+    triplets_cfg = bench_cfg.triplets_config
+    assert triplets_cfg is not None, "cfg.eval.triplets must be provided"
+    if triplets_cfg is None:
         return
 
     print(f"\n{'='*80}")
     print(f"TRIPLETS EVALUATION: {clip.name}")
     print(f"{'='*80}")
 
-    selector = TripletsFrameSelector(bench_cfg)
-    samples = selector.select_sequences()
+    try:
+        selector = TripletsFrameSelector(bench_cfg)
+        samples = selector.select_sequences()
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        print("Skipping triplets evaluation for this clip.")
+        print("CholecT50 labels are only available for videos 1-50.")
+        return
+
     if not samples:
         print("ERROR: No samples selected! Check if preprocessed data is available.")
         return
@@ -116,11 +131,9 @@ def evaluate_triplets(clip: DictConfig, cfg: DictConfig):
 def evaluate_temporal(clip: DictConfig, cfg: DictConfig):
     """Run temporal action localization evaluation for a single clip."""
     bench_cfg = _build_benchmark_config(cfg, clip)
-
-    # =========================================================================
-    # TEMPORAL EVALUATION
-    # =========================================================================
-    if bench_cfg.temporal_config is None:
+    temporal_cfg = bench_cfg.temporal_config
+    assert temporal_cfg is not None, "cfg.eval.temporal must be provided"
+    if temporal_cfg is None:
         return
 
     print(f"\n{'='*80}")
@@ -154,6 +167,12 @@ def evaluate_temporal(clip: DictConfig, cfg: DictConfig):
 
     # Run temporal evaluation
     evaluator = TemporalFrameEvaluator(bench_cfg)
+
+    # Check if evaluator was initialized successfully
+    if evaluator.num_frames == 0:
+        print("Skipping temporal evaluation due to missing data.")
+        return
+
     results = evaluator.run_temporal_benchmark(
         annotations=temporal_data["annotations"],
         ablations=bench_cfg.temporal_config["ablations"],
@@ -272,8 +291,24 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
     bench_cfg = _build_benchmark_config(cfg, clip)
     spatial_cfg = bench_cfg.spatial_config
     assert spatial_cfg is not None, "cfg.eval.spatial must be provided"
+    if spatial_cfg is None:
+        return
 
-    graph_subdir = spatial_cfg["graph_subdir"]
+    print(f"\n{'='*80}")
+    print(f"SPATIAL EVALUATION: {clip.name}")
+    print(f"{'='*80}")
+
+    # Check if clip has spatial evaluation file specified
+    if not hasattr(clip, "spatial_eval_file") or clip.spatial_eval_file is None:
+        print(f"No spatial_eval_file specified for clip {clip.name}")
+        print("Skipping spatial evaluation for this clip.")
+        print(
+            "To enable, add 'spatial_eval_file: path/to/spatial_prompts.json' to clip config"
+        )
+        return
+
+    # Use configured graph_subdir or fall back to the one in spatial_cfg if specified
+    graph_subdir = spatial_cfg.get("graph_subdir", bench_cfg.graph_subdir)
     graph_dir = bench_cfg.output_root / clip.name / graph_subdir
 
     # Load required artifacts
@@ -283,9 +318,22 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
     # Write overlays to a dedicated spatial file (non-destructive)
     rerun_file = graph_dir / "visualization_spatial.rrd"
 
-    assert splat_feats_path.exists(), f"Missing {splat_feats_path}"
-    assert splat_indices_path.exists(), f"Missing {splat_indices_path}"
-    assert positions_path.exists(), f"Missing {positions_path}"
+    # Check that all required files exist before proceeding
+    missing_files = []
+    if not splat_feats_path.exists():
+        missing_files.append(str(splat_feats_path))
+    if not splat_indices_path.exists():
+        missing_files.append(str(splat_indices_path))
+    if not positions_path.exists():
+        missing_files.append(str(positions_path))
+
+    if missing_files:
+        print(f"ERROR: Missing required spatial grounding files:")
+        for f in missing_files:
+            print(f"  - {f}")
+        print("Skipping spatial evaluation due to missing data.")
+        print("Please run spatial grounding feature extraction first.")
+        return
 
     splat_feats = np.load(splat_feats_path)  # (T, N, D)
     splat_indices = np.load(splat_indices_path)  # (N,)
@@ -294,7 +342,12 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
     T, N, D = splat_feats.shape
 
     # Get spatial eval data from file
-    spatial_eval_file = clip.spatial_eval_file
+    spatial_eval_file = Path(clip.spatial_eval_file)
+    if not spatial_eval_file.exists():
+        print(f"ERROR: Spatial evaluation file not found: {spatial_eval_file}")
+        print("Skipping spatial evaluation for this clip.")
+        return
+
     with open(spatial_eval_file, "r") as f:
         spatial_eval_data = json.load(f)
     spatial_prompts = spatial_eval_data["spatial_prompts"]
@@ -306,13 +359,28 @@ def evaluate_spatial(clip: DictConfig, cfg: DictConfig):
 
     # Compute relevant dirs from cfg
     colmap_root = os.path.join(cfg.preprocessed_root, clip.name)
-    image_dir = os.path.join(cfg.preprocessed_root, clip.name, "images")
+    image_dir = os.path.join(cfg.preprocessed_root, clip.name, bench_cfg.images_subdir)
+
+    # Check if image directory exists
+    if not Path(image_dir).exists():
+        print(f"ERROR: Images directory not found: {image_dir}")
+        print(
+            f"Expected structure: {cfg.preprocessed_root}/{clip.name}/{bench_cfg.images_subdir}/"
+        )
+        print("Skipping spatial evaluation due to missing data.")
+        return
 
     # Load all camera parameters of the appropriate clip, will need some of them depending to project 3D to 2D
-    scene_info = readColmapSceneInfo(colmap_root, images=None, eval=False)
-    train_cameras = scene_info.train_cameras
-    test_cameras = scene_info.test_cameras
-    assert len(test_cameras) == 0, "Test cameras should be empty"
+    try:
+        scene_info = readColmapSceneInfo(colmap_root, images=None, eval=False)
+        train_cameras = scene_info.train_cameras
+        test_cameras = scene_info.test_cameras
+        assert len(test_cameras) == 0, "Test cameras should be empty"
+    except Exception as e:
+        print(f"ERROR: Could not load COLMAP scene info from {colmap_root}")
+        print(f"Error: {e}")
+        print("Skipping spatial evaluation due to missing data.")
+        return
 
     # Load patched model with attentions enabled
     use_4bit = bench_cfg.use_4bit_quantization
