@@ -5,7 +5,7 @@ depth_subdir: depth
 spatial_labels_root: data/spatial_labels
 spatial_labels_input_filename_template: "{clip_name}_spatial.json"
 spatial_labels_output_filename: "spatial_labels.json"
-dump_label_visualizations: false
+dump_label_visualizations: true
 label_viz_subdir: label_viz
 
 frames_divisor: 28 # after removing black borders, center crop to multiple of this for qwen to work

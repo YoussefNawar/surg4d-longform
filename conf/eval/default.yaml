@@ -1,6 +1,6 @@
 defaults:
-  - triplets: default
-  - temporal: default
+  # - triplets: default
+  # - temporal: default
   - spatial: default
   - _self_
 
@@ -10,7 +10,7 @@ temporal: null
 # spatial: null
 
 # Required output directory for benchmark results
-output_dir: ${output_root}/benchmark
+output_dir: ${output_root}/predictions
 
 # Optional output override for benchmark results
 output: null

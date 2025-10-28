@@ -1,10 +1,14 @@
 import gc
+import json
 from pathlib import Path
 from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 import hydra
+import numpy as np
+import torch
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
+from qwen_vl import get_patched_qwen
 
 from benchmark.benchmark_config import BenchmarkConfig
 from benchmark.frame_selectors import TripletsFrameSelector
@@ -13,17 +17,13 @@ from benchmark.temporal_evaluator import TemporalFrameEvaluator
 from benchmark.spatial import (
     get_patched_qwen_for_spatial_grounding,
     splat_feat_queries,
+    dump_spatial_prediction_visualizations,
+    static_graph_feat_queries,
 )
 from rerun_utils import (
     init_and_save_rerun,
     log_spatial_predictions,
 )
-import numpy as np
-import torch
-
-import json
-
- 
 
 
 def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfig:
@@ -208,6 +208,8 @@ def evaluate_spatial(
     cfg: DictConfig,
     model_spatial: Qwen2_5_VLForConditionalGeneration,
     processor_spatial: Qwen2_5_VLProcessor,
+    model: Qwen2_5_VLForConditionalGeneration,
+    processor: Qwen2_5_VLProcessor,
 ):
     """Compute text-to-vision attention over sampled scene points and log heatmaps to rerun.
 
@@ -258,15 +260,47 @@ def evaluate_spatial(
         cfg=cfg,
     )
 
+    results_static_graph = static_graph_feat_queries(
+        model=model,
+        processor=processor,
+        graph_dir=graph_dir,
+        clip_gt=gt_data,
+        clip=clip,
+        cfg=cfg,
+    )
+
     # save predictions
     all_results = {
         "splat": results_splat,
+        "static_graph": results_static_graph,
     }
     out_dir = Path(cfg.eval.spatial.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions_file = out_dir / f"{clip.name}.json"
     with open(predictions_file, "w") as f:
         json.dump(all_results, f, indent=4)
+
+    # Optional: dump per-(query, layer) visualizations of top-k points on the frame
+    if cfg.eval.spatial.dump_visualizations:
+        dump_spatial_prediction_visualizations(
+            results_splat=results_splat,
+            clip_name=clip.name,
+            preprocessed_root=Path(cfg.preprocessed_root),
+            images_subdir=cfg.eval.paths.images_subdir,
+            gt_data=gt_data,
+            viz_dir=Path(cfg.eval.spatial.visualizations_dir),
+            method_name="splat",
+        )
+        # Also dump for static-graph baseline
+        dump_spatial_prediction_visualizations(
+            results_splat=results_static_graph,
+            clip_name=clip.name,
+            preprocessed_root=Path(cfg.preprocessed_root),
+            images_subdir=cfg.eval.paths.images_subdir,
+            gt_data=gt_data,
+            viz_dir=Path(cfg.eval.spatial.visualizations_dir),
+            method_name="static",
+        )
 
     # Initialize rerun sink for spatial visualization
     init_and_save_rerun(graph_dir / "visualization_spatial.rrd")
@@ -279,10 +313,22 @@ def evaluate_spatial(
         results=results_splat,
         cmap_name=cfg.eval.spatial.colormap,
     )
+    # And log static graph results under a separate tree
+    log_spatial_predictions(
+        base_path="static_graph",
+        clip_name=clip.name,
+        positions_through_time=positions,
+        results=results_static_graph,
+        cmap_name=cfg.eval.spatial.colormap,
+    )
 
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")
 def main(cfg: DictConfig):
+    model, processor = get_patched_qwen(
+        use_bnb_4bit=cfg.eval.spatial.use_bnb_4bit,
+        use_bnb_8bit=cfg.eval.spatial.use_bnb_8bit,
+    )
     model_spatial, processor_spatial = get_patched_qwen_for_spatial_grounding(
         use_bnb_4bit=cfg.eval.spatial.use_bnb_4bit,
         use_bnb_8bit=cfg.eval.spatial.use_bnb_8bit,
@@ -291,7 +337,14 @@ def main(cfg: DictConfig):
     for clip in tqdm(cfg.clips, desc="Evaluating clips", unit="clip"):
         evaluate_triplets(clip, cfg)
         evaluate_temporal(clip, cfg)
-        evaluate_spatial(clip, cfg, model_spatial, processor_spatial)
+        evaluate_spatial(
+            clip=clip,
+            cfg=cfg,
+            model=model,
+            processor=processor,
+            model_spatial=model_spatial,
+            processor_spatial=processor_spatial,
+        )
 
     del model_spatial
     del processor_spatial

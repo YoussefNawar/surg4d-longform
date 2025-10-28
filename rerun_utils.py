@@ -3,6 +3,7 @@ import rerun as rr
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from typing import List, Optional
+import re
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import SH2RGB
 
@@ -460,11 +461,17 @@ def log_spatial_grounding_heatmaps(
         ),
     )
 
+    def _sanitize_segment(seg: str) -> str:
+        seg = seg.strip()
+        seg = re.sub(r"\s+", "_", seg)
+        seg = seg.replace("/", "-")
+        return seg
+
     for lpos, layer_idx in enumerate(layers):
         layer_path = f"{base_path}/layer_{layer_idx}"
         # Per-token
         for qpos, tok_idx in enumerate(query_token_indices):
-            tok = tokens[tok_idx]
+            tok = _sanitize_segment(tokens[tok_idx])
             vals = scores[lpos, qpos]
             labels = [f"{tok}:{float(v):.4f}" for v in vals]
             log_scalar_values_over_points(
@@ -560,8 +567,14 @@ def log_spatial_query_group(
     prefix = f"{base_path}/{clip_name}/t{int(timestep_int):06d}/"
     if group_name:
         prefix = f"{prefix}{group_name}/"
+    def _sanitize_segment(seg: str) -> str:
+        seg = seg.strip()
+        seg = re.sub(r"\s+", "_", seg)
+        seg = seg.replace("/", "-")
+        return seg
+
     for qidx, qitem in enumerate(query_list):
-        qname = qitem.get("query", f"query_{qidx}")
+        qname = _sanitize_segment(qitem.get("query", f"query_{qidx}"))
         preds = qitem.get("predictions", {})
         for layer_idx, pred in preds.items():
             layer_str = str(layer_idx)

@@ -2,3 +2,27 @@ layers: [14, 16, 18, 20, 22]
 colormap: "jet"
 use_bnb_4bit: false
 use_bnb_8bit: false
+gt_filename: ${preprocessing.spatial_labels_output_filename}
+top_k_scores: 10
+output_dir: ${eval.output_dir}/spatial
+splat_prompt_template: "Locate {substring} in the scene."
+dump_visualizations: true
+visualizations_dir: ${eval.output_dir}/spatial_viz
+static_graph_system_prompt: |
+  You are an expert visceral surgeon analyzing a cholecystectomy scene using an approximate scene graph.
+  - The scene graph is a general description; it may not name every tool or action explicitly.
+  - Always infer a best-guess 3D location for the queried concept using surgical knowledge,
+    synonyms, and spatial understanding of the provided objects, relationships, and extents.
+  - Never refuse. Never say the concept is missing. Never return an empty object.
+  - Respond with VALID JSON only (no extra text) containing numeric fields: x, y, z.
+  - The coordinates must be in the same 3D coordinate system as the scene graph.
+static_graph_prompt_template: |
+  Query: '{substring}'
+
+  Task: Infer the most plausible 3D location of the queried concept within the scene described
+  by the provided scene graph. Even if the exact term is not present as a node or edge label,
+  use synonyms, typical surgical context, object geometry (centroids/extents), and spatial
+  relations to pick a best-guess location.
+
+  Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
+  Example (format only): {"x": 0.12, "y": -0.08, "z": 0.95}

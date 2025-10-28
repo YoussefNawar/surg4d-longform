@@ -3,7 +3,9 @@ from omegaconf import DictConfig
 import torch
 import numpy as np
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
-from typing import List
+from typing import List, Dict, Any, Optional
+import cv2
+import re
 
 import qwen_vl
 from scene.dataset_readers import CameraInfo, readColmapSceneInfo
@@ -240,9 +242,11 @@ def splat_predict_query_list(
 
             top_positions = pos_t[top_indices]
 
-            frame_name = f"{clip_name}_{frame_number:06d}.jpg"
+            # Use frame_number directly from GT (assumed local zero-based index)
+            local_idx = int(frame_number)
+            frame_name = f"frame_{local_idx:06d}.jpg"
             proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
-                frame_number, train_cameras, frame_name
+                local_idx, train_cameras, frame_name
             )
             top_pixels = project_3d_to_2d(
                 top_positions, proj_matrix, img_width, img_height
@@ -273,16 +277,12 @@ def splat_feat_queries(
     )
     train_cameras = scene_info.train_cameras
 
-    # positions are (T, N, 3); we'll subset per-timestep inside the loop
-
     results = {}
     for timestep, timestep_queries in clip_gt.items():
         t = int(timestep)
         ts_feats = splat_feats[t]
-        # Subset positions for this timestep and the chosen splat indices
         pos_t = positions[t][splat_indices]
 
-        # Prepare grouped containers matching GT schema
         results[timestep] = {"objects": [], "actions": []}
 
         layers = cfg.eval.spatial.layers
@@ -319,3 +319,299 @@ def splat_feat_queries(
         )
 
     return results
+
+
+def _parse_point_from_json(text: str) -> Optional[List[float]]:
+    """Extract a single 3D point [x, y, z] from a JSON object in the given text.
+
+    The model is instructed to return pure JSON, but we make this robust by:
+      1) locating the first JSON object in the text, attempting json.loads
+      2) falling back to regex-based triple float extraction if needed
+    """
+    import json as _json
+    import re as _re
+
+    # Try to find a JSON object in the text
+    try:
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            candidate = text[first_brace : last_brace + 1]
+            obj = _json.loads(candidate)
+            # Accept either {"x":..,"y":..,"z":..} or {"point":{"x":..,"y":..,"z":..}}
+            if isinstance(obj, dict):
+                if all(k in obj for k in ("x", "y", "z")):
+                    return [float(obj["x"]), float(obj["y"]), float(obj["z"])]
+                if "point" in obj and isinstance(obj["point"], dict):
+                    point = obj["point"]
+                    if all(k in point for k in ("x", "y", "z")):
+                        return [float(point["x"]), float(point["y"]), float(point["z"])]
+    except Exception:
+        pass
+
+    # Fallback: extract first three floats
+    nums = _re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", text)
+    if len(nums) >= 3:
+        try:
+            return [float(nums[0]), float(nums[1]), float(nums[2])]
+        except Exception:
+            return None
+    return None
+
+
+def _format_only_substring(template: str, substring: str) -> str:
+    """Safely format only the {substring} placeholder, escaping all other braces.
+
+    This allows examples like {"x": 0.1} in the prompt without triggering str.format
+    KeyErrors. Usage: question = _format_only_substring(tmpl, substring)
+    """
+    # First escape all braces
+    safe = template.replace("{", "{{").replace("}", "}}")
+    # Then unescape the placeholder we want to actually format
+    safe = safe.replace("{{substring}}", "{substring}")
+    return safe.format(substring=substring)
+
+
+def static_graph_predict_query_list(
+    queries_list,
+    *,
+    model,
+    processor,
+    node_feats_npz,
+    adjacency_matrices: np.ndarray,
+    node_centers: np.ndarray,
+    node_centroids: np.ndarray,
+    node_extents: np.ndarray,
+    timestep_idx: int,
+    frame_number: int,
+    train_cameras,
+    system_prompt: str,
+    prompt_template: str,
+):
+    """Predict a single 3D point per query via Qwen prompted with a static graph.
+
+    Returns same structure as splat_predict_query_list but without scores and with
+    exactly one point per mock layer.
+    """
+    outputs = []
+
+    # Precompute projection for this frame
+    frame_name = f"frame_{int(frame_number):06d}.jpg"
+    proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
+        int(frame_number), train_cameras, frame_name
+    )
+
+    for query in queries_list:
+        substring = query["query"]
+        question = _format_only_substring(prompt_template, substring)
+
+        # Call Qwen with the static graph at this timestep
+        response = qwen_vl.prompt_with_static_graph(
+            question=question,
+            node_feats=node_feats_npz,
+            node_feats_timestep_idx=int(timestep_idx),
+            adjacency_matrices=adjacency_matrices,
+            node_centers=node_centers,
+            node_centroids=node_centroids,
+            node_extents=node_extents,
+            model=model,
+            processor=processor,
+            system_prompt=system_prompt,
+        )
+
+        point3d = _parse_point_from_json(response)
+        if point3d is None:
+            # Fallback to origin if parsing fails
+            point3d = [0.0, 0.0, 0.0]
+
+        # Project to pixel coords
+        pos_arr = np.array(point3d, dtype=np.float32).reshape(1, 3)
+        pixels = project_3d_to_2d(pos_arr, proj_matrix, img_width, img_height)
+
+        out_item = {"query": substring, "predictions": {}, "raw_response": response}
+        # Single mock layer key for static baseline
+        out_item["predictions"]["0"] = {
+            "pixel_coords": pixels.tolist(),
+            "positions": pos_arr.tolist(),
+        }
+        outputs.append(out_item)
+
+    return outputs
+
+
+def static_graph_feat_queries(
+    *,
+    model,
+    processor,
+    graph_dir: Path | str,
+    clip_gt: Dict[str, Any],
+    clip: DictConfig,
+    cfg: DictConfig,
+):
+    """Run static-graph prompting baseline across all queries for a clip.
+
+    Loads static graph artifacts and returns grouped results per timestep
+    with the same structure as splat_feat_queries (sans scores).
+    """
+    graph_dir = Path(graph_dir)
+
+    # Required static graph artifacts
+    node_feats_npz_path = graph_dir / "c_qwen_feats.npz"
+    adjacency_path = graph_dir / "graph.npy"
+    centers_path = graph_dir / "c_centers.npy"
+    centroids_path = graph_dir / "c_centroids.npy"
+    extents_path = graph_dir / "c_extents.npy"
+
+    node_feats_npz = np.load(node_feats_npz_path)
+    adjacency_matrices = np.load(adjacency_path)
+    node_centers = np.load(centers_path)
+    node_centroids = np.load(centroids_path)
+    node_extents = np.load(extents_path)
+
+    # Cameras for projection
+    scene_info = readColmapSceneInfo(
+        Path(cfg.preprocessed_root) / clip.name, images=None, eval=False
+    )
+    train_cameras = scene_info.train_cameras
+
+    system_prompt = cfg.eval.spatial.static_graph_system_prompt
+    prompt_template = cfg.eval.spatial.static_graph_prompt_template
+
+    results: Dict[str, Any] = {}
+    for timestep, timestep_queries in clip_gt.items():
+        t = int(timestep)
+        frame_number = int(timestep_queries["frame_number"])  # local idx
+
+        results[timestep] = {"objects": [], "actions": []}
+
+        results[timestep]["objects"] = static_graph_predict_query_list(
+            timestep_queries.get("objects", []),
+            model=model,
+            processor=processor,
+            node_feats_npz=node_feats_npz,
+            adjacency_matrices=adjacency_matrices,
+            node_centers=node_centers,
+            node_centroids=node_centroids,
+            node_extents=node_extents,
+            timestep_idx=t,
+            frame_number=frame_number,
+            train_cameras=train_cameras,
+            system_prompt=system_prompt,
+            prompt_template=prompt_template,
+        )
+
+        results[timestep]["actions"] = static_graph_predict_query_list(
+            timestep_queries.get("actions", []),
+            model=model,
+            processor=processor,
+            node_feats_npz=node_feats_npz,
+            adjacency_matrices=adjacency_matrices,
+            node_centers=node_centers,
+            node_centroids=node_centroids,
+            node_extents=node_extents,
+            timestep_idx=t,
+            frame_number=frame_number,
+            train_cameras=train_cameras,
+            system_prompt=system_prompt,
+            prompt_template=prompt_template,
+        )
+
+    return results
+
+
+def dump_spatial_prediction_visualizations(
+    *,
+    results_splat: Dict[str, Any],
+    clip_name: str,
+    preprocessed_root: Path | str,
+    images_subdir: str,
+    gt_data: Dict[str, Any],
+    viz_dir: Path | str,
+    method_name: str | None = None,
+) -> None:
+    """Render top-k predicted points onto the corresponding frames and save images.
+
+    Args:
+        results_splat: Predictions dictionary returned by splat_feat_queries for a clip.
+        clip_name: Name of the clip.
+        preprocessed_root: Root directory for preprocessed data.
+        images_subdir: Subdirectory name containing images for the clip.
+        gt_data: Ground-truth dict used during evaluation; must contain frame_number per timestep.
+        viz_dir: Output directory root for visualizations.
+    """
+
+    def _sanitize_filename(text: str) -> str:
+        text = text.strip().lower()
+        text = re.sub(r"\s+", "_", text)
+        text = re.sub(r"[^a-z0-9._-]", "", text)
+        return text[:120] if len(text) > 120 else text
+
+    def _draw_points(
+        img_bgr,
+        coords,
+        color_bgr=(255, 0, 0),
+        radius: int = 5,
+        draw_indices: bool = False,
+    ):
+        for idx, (x, y) in enumerate(coords):
+            xi, yi = int(x), int(y)
+            cv2.circle(img_bgr, (xi, yi), radius, color_bgr, thickness=-1)
+            if draw_indices:
+                # 1-based rank index
+                label = str(idx + 1)
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.6
+                thickness = 2
+                (tw, th), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+                # Position to the top-right of the point
+                tx = xi + radius + 3
+                ty = yi - radius - 3
+                # Ensure within image bounds
+                tx = max(0, min(tx, img_bgr.shape[1] - tw - 1))
+                ty = max(th + 1, min(ty, img_bgr.shape[0] - 1))
+                # Draw background rectangle for contrast
+                cv2.rectangle(
+                    img_bgr,
+                    (tx - 2, ty - th - 2),
+                    (tx + tw + 2, ty + baseline + 2),
+                    (0, 0, 0),
+                    thickness=-1,
+                )
+                # Draw text
+                cv2.putText(img_bgr, label, (tx, ty), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        return img_bgr
+
+    # Organize outputs under .../viz_dir/<method>/<clip>
+    viz_root = Path(viz_dir) / method_name / clip_name
+    viz_root.mkdir(parents=True, exist_ok=True)
+
+    images_dir = Path(preprocessed_root) / clip_name / images_subdir
+
+    for timestep, group_preds in results_splat.items():
+        timestep_str = str(timestep)
+        if timestep_str not in gt_data:
+            continue
+        frame_number = int(gt_data[timestep_str]["frame_number"])  # type: ignore[index]
+        # Use frame_number directly from GT (assumed local zero-based index)
+        frame_path = images_dir / f"frame_{frame_number:06d}.jpg"
+        if not frame_path.exists():
+            continue
+        base_img = cv2.imread(str(frame_path))
+        if base_img is None:
+            continue
+
+        # Draw for objects and actions separately
+        for group_name, color in (("objects", (255, 0, 0)), ("actions", (0, 0, 255))):
+            items = group_preds.get(group_name, [])
+            for item in items:
+                query = item.get("query", group_name)
+                preds_by_layer = item.get("predictions", {})
+                for layer_key, pred in preds_by_layer.items():
+                    layer_str = str(layer_key)
+                    coords = pred.get("pixel_coords", [])
+                    if not coords:
+                        continue
+                    img = base_img.copy()
+                    img = _draw_points(img, coords, color_bgr=color, radius=5, draw_indices=True)
+                    out_name = f"{frame_number:06d}_L{layer_str}_{group_name}_{_sanitize_filename(query)}.jpg"
+                    cv2.imwrite(str(viz_root / out_name), img)
