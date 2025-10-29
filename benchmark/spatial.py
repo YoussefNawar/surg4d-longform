@@ -1113,17 +1113,12 @@ def frame_attn_refine_feat_queries(
     results: Dict[str, Any] = {}
     images_dir = Path(preprocessed_root) / clip.name / images_subdir
 
-    attn_layer = int(cfg.eval.spatial.get("frame_attn_refine_attn_layer", 20))
-    top_k_default = cfg.eval.spatial.top_k_scores
+    attn_layer = cfg.eval.spatial.frame_attn_refine_attn_layer
     prompt_template_attn = cfg.eval.spatial.frame_attn_prompt_template
     system_prompt_attn = cfg.eval.spatial.frame_attn_system_prompt
     prompt_template_refine = cfg.eval.spatial.frame_attn_refine_prompt_template
     system_prompt_refine = cfg.eval.spatial.frame_attn_refine_system_prompt
-    include_scores = bool(
-        cfg.eval.spatial.get("frame_attn_refine_include_scores_in_context", False)
-    )
-    num_props = int(cfg.eval.spatial.get("frame_attn_refine_num_proposals", 0) or 0)
-    effective_top_k = num_props if num_props > 0 else top_k_default
+    include_scores = cfg.eval.spatial.frame_attn_refine_include_scores_in_context
 
     for timestep, timestep_queries in clip_gt.items():
         frame_number = int(timestep_queries["frame_number"])  # local idx
@@ -1142,7 +1137,7 @@ def frame_attn_refine_feat_queries(
             processor=processor,
             image=image,
             attn_layer=attn_layer,
-            top_k=effective_top_k,
+            top_k=cfg.eval.spatial.frame_attn_refine_max_proposals,
             prompt_template_attn=prompt_template_attn,
             system_prompt_attn=system_prompt_attn,
             prompt_template_refine=prompt_template_refine,
@@ -1158,7 +1153,7 @@ def frame_attn_refine_feat_queries(
             processor=processor,
             image=image,
             attn_layer=attn_layer,
-            top_k=effective_top_k,
+            top_k=cfg.eval.spatial.frame_attn_refine_max_proposals,
             prompt_template_attn=prompt_template_attn,
             system_prompt_attn=system_prompt_attn,
             prompt_template_refine=prompt_template_refine,
