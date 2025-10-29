@@ -1,14 +1,15 @@
-layers: [14, 16, 18, 20, 22]
 colormap: "jet"
 use_bnb_4bit: false
 use_bnb_8bit: false
 gt_filename: ${preprocessing.spatial_labels_output_filename}
-top_k_scores: 10
 output_dir: ${eval.output_dir}/spatial
 dump_visualizations: true
 visualizations_dir: ${eval.output_dir}/spatial_viz
 
-# prompts
+layers: [14, 16, 18, 20, 22]
+top_k_scores: 10 # for attn based methods wo/ refinement
+
+# splat: attention scores over all gaussians
 # splat_system_prompt: |
 #   You are an expert surgical assistant. The visual evidence is provided as an unordered set of
 #   patch-level descriptors without any spatial or grid layout. Treat these descriptors as an
@@ -19,6 +20,7 @@ splat_system_prompt: |
   in the image that correspond to the user's query. No explanations are needed.
 splat_prompt_template: "Locate {substring} using the unordered patch descriptors. Ignore spatial order and grid structure; match semantics only."
 
+# static graph: just ask the static graph
 static_graph_system_prompt: |
   You are an expert visceral surgeon analyzing a cholecystectomy scene using an approximate scene graph.
   - The scene graph is a general description; it may not name every tool or action explicitly.
@@ -38,12 +40,16 @@ static_graph_prompt_template: |
   Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
   Example (format only): {"x": 0.12, "y": -0.08, "z": 0.95}
 
+# frame_attn: attention scores over frame patches
 frame_attn_system_prompt: |
   You are an expert surgical assistant. Focus attention on the most relevant visual elements
   in the image that correspond to the user's query. No explanations are needed.
 frame_attn_prompt_template: "Locate {substring} in the scene."
 
-# 2D attention proposals + refinement via normal Qwen
+# frame attn refine: 2d attention score proposal, final pixel guess by qwen
+frame_attn_refine_attn_layer: 16
+frame_attn_refine_include_scores_in_context: false
+frame_attn_refine_max_proposals: 10
 frame_attn_refine_system_prompt: |
   You are an expert surgical assistant. First, consider the scene content and the candidate pixel proposals.
   - Use typical surgical context and the visible objects/regions to reason where the queried concept is likely located.
@@ -57,20 +63,20 @@ frame_attn_refine_prompt_template: |
   2) From the candidate pixel proposals listed below, choose the single best pixel (x, y) that fits this region.
 
 # Attention layer for 2D proposal extraction
-frame_attn_refine_attn_layer: 16
 
 # Optionally list scores alongside proposals
-frame_attn_refine_include_scores_in_context: false
 
 # Number of 2D proposals to include (if 0 or missing, falls back to top_k_scores)
-frame_attn_refine_num_proposals: 10
 
 # frame_attn_prompt_template: | # TODO try this for both
 #   Locate '{substring}' in this surgical frame. Focus attention on the most relevant
 #   image regions that correspond to the queried concept, using typical surgical context
 #   and visual cues. No explanation needed.
 
-# SPLAT proposals + static-graph refinement
+# splat graph: 3d point proposals by splat attention, final 3d point by qwen, project to 2d
+splat_graph_attn_layer: 16
+splat_graph_max_proposals: 10
+splat_graph_include_scores_in_context: false
 splat_graph_system_prompt: |
   You are an expert visceral surgeon analyzing a cholecystectomy scene using an approximate scene graph.
   - FIRST, reason over the scene graph (objects, relations, centroids/centers/extents) to infer the approximate 3D region of the queried concept.
@@ -87,12 +93,3 @@ splat_graph_prompt_template: |
   2) From the candidate proposals listed below, choose the single best point that fits this region and the graph's spatial relations.
   - Prefer proposals aligned with relevant objects and their extents/centroids.
   - If none are ideal, select the closest proposal that is still plausible per the graph.
-
-# Attention layer to use for SPLAT proposal extraction (single layer)
-splat_graph_attn_layer: 16
-
-# Limit how many proposals we include (0 or missing = no limit)
-splat_graph_max_proposals: 10
-
-# Optionally include attention scores next to proposals in the textual context
-splat_graph_include_scores_in_context: false

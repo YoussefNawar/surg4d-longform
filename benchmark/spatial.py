@@ -166,8 +166,12 @@ def extract_text_to_image_attention(
     ]
 
     # Build text and inputs using real image
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = processor(text=[text], images=[[image]], padding=True, return_tensors="pt").to(model.device)
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    inputs = processor(
+        text=[text], images=[[image]], padding=True, return_tensors="pt"
+    ).to(model.device)
 
     with torch.no_grad():
         outputs = model(
@@ -180,7 +184,9 @@ def extract_text_to_image_attention(
 
     # Identify vision token positions via <|image_pad|>
     input_ids = inputs.input_ids[0]
-    image_pad_token = processor.tokenizer.encode("<|image_pad|>", add_special_tokens=False)[0]
+    image_pad_token = processor.tokenizer.encode(
+        "<|image_pad|>", add_special_tokens=False
+    )[0]
     image_pad_positions = (input_ids == image_pad_token).nonzero(as_tuple=True)[0]
     if image_pad_positions.numel() == 0:
         raise ValueError("No <|image_pad|> tokens found in input sequence.")
@@ -232,7 +238,9 @@ def project_3d_to_2d(
     assert positions.shape[1] == 3, "Positions must be (N, 3)"
 
     # Conver to homogeneous coordinates
-    positions = torch.tensor(positions, device=proj_matrix.device, dtype=proj_matrix.dtype)
+    positions = torch.tensor(
+        positions, device=proj_matrix.device, dtype=proj_matrix.dtype
+    )
     ones = torch.ones(
         (positions.shape[0], 1), dtype=positions.dtype, device=positions.device
     )
@@ -311,7 +319,7 @@ def splat_predict_query_list(
 ):
     outputs = []
     # Reorder features by projected frame patch indices (no aggregation)
-    reordered_feats, new_to_orig = _reorder_feats_by_frame_patches(
+    reordered_feats, new_to_orig = reorder_by_frame_patches(
         ts_feats=ts_feats,
         pos_t=pos_t,
         train_cameras=train_cameras,
@@ -664,7 +672,6 @@ def splat_graph_predict_query_list(
     ts_feats: np.ndarray,
     pos_t: np.ndarray,
     attn_layer: int,
-    top_k: int,
     timestep_idx: int,
     frame_number: int,
     train_cameras,
@@ -695,7 +702,7 @@ def splat_graph_predict_query_list(
     )
 
     # Prepare features reordered by frame patches for attention
-    reordered_feats, new_to_orig = _reorder_feats_by_frame_patches(
+    reordered_feats, new_to_orig = reorder_by_frame_patches(
         ts_feats=ts_feats,
         pos_t=pos_t,
         train_cameras=train_cameras,
@@ -720,11 +727,13 @@ def splat_graph_predict_query_list(
         # Collect proposals across layers (average over query tokens)
         proposals_list: list[dict] = []
         layer_scores = attn_scores[0].mean(dim=0)  # [V], mean over query tokens only
-        top_scores, top_indices = layer_scores.topk(k=top_k, sorted=True)
+        top_scores, top_indices = layer_scores.topk(k=max_proposals, sorted=True)
         top_indices_np = top_indices.detach().cpu().numpy()
         top_scores_np = top_scores.detach().cpu().numpy()
         orig_indices = new_to_orig[top_indices_np]
-        for rank_idx, (orig_i, score_val) in enumerate(zip(orig_indices, top_scores_np)):
+        for rank_idx, (orig_i, score_val) in enumerate(
+            zip(orig_indices, top_scores_np)
+        ):
             xyz = pos_t[orig_i]
             proposals_list.append(
                 {
@@ -735,31 +744,27 @@ def splat_graph_predict_query_list(
                 }
             )
 
-        # Optional cap on number of proposals
-        if max_proposals is not None and len(proposals_list) > max_proposals:
-            proposals_list = proposals_list[: int(max_proposals)]
-
         # Build question for static-graph step, embedding proposals textually
         question = _format_only_substring(prompt_template_graph, substring)
-        if len(proposals_list) > 0:
-            if include_scores_in_context:
-                lines = [
-                    "Candidate 3D proposals (x, y, z) with attention scores:",
-                    *[
-                        f"- {p['xyz'][0]:.4f}, {p['xyz'][1]:.4f}, {p['xyz'][2]:.4f}"
-                        f" (score={p['score']:.4f}, layer={p['layer']}, rank={p['rank']})"
-                        for p in proposals_list
-                    ],
-                ]
-            else:
-                lines = [
-                    "Candidate 3D proposals (x, y, z):",
-                    *[
-                        f"- {p['xyz'][0]:.4f}, {p['xyz'][1]:.4f}, {p['xyz'][2]:.4f}"
-                        for p in proposals_list
-                    ],
-                ]
-            question = question + "\n\n" + "\n".join(lines)
+        if include_scores_in_context:
+            lines = [
+                "Candidate 3D proposals (x, y, z) with attention scores:",
+                *[
+                    f"- {p['xyz'][0]:.4f}, {p['xyz'][1]:.4f}, {p['xyz'][2]:.4f}"
+                    # f" (score={p['score']:.4f}, layer={p['layer']}, rank={p['rank']})"
+                    f" (score={p['score']:.4f}, rank={p['rank']})"
+                    for p in proposals_list
+                ],
+            ]
+        else:
+            lines = [
+                "Candidate 3D proposals (x, y, z):",
+                *[
+                    f"- {p['xyz'][0]:.4f}, {p['xyz'][1]:.4f}, {p['xyz'][2]:.4f}"
+                    for p in proposals_list
+                ],
+            ]
+        question = question + "\n\n" + "\n".join(lines)
 
         response = qwen_vl.prompt_with_static_graph(
             question=question,
@@ -827,17 +832,13 @@ def splat_graph_feat_queries(
     )
     train_cameras = scene_info.train_cameras
 
-    top_k = cfg.eval.spatial.top_k_scores
     system_prompt_splat_attn = cfg.eval.spatial.splat_system_prompt
     static_graph_system_prompt = cfg.eval.spatial.splat_graph_system_prompt
     prompt_template_attn = cfg.eval.spatial.splat_prompt_template
     prompt_template_graph = cfg.eval.spatial.splat_graph_prompt_template
-    attn_layer = int(cfg.eval.spatial.get("splat_graph_attn_layer", 20))
-    max_props = int(cfg.eval.spatial.get("splat_graph_max_proposals", 0) or 0)
-    max_props = max_props if max_props > 0 else None
-    include_scores = bool(
-        cfg.eval.spatial.get("splat_graph_include_scores_in_context", False)
-    )
+    attn_layer = cfg.eval.spatial.splat_graph_attn_layer
+    max_props = cfg.eval.spatial.splat_graph_max_proposals
+    include_scores = cfg.eval.spatial.splat_graph_include_scores_in_context
 
     results: Dict[str, Any] = {}
     for timestep, timestep_queries in clip_gt.items():
@@ -855,7 +856,6 @@ def splat_graph_feat_queries(
             ts_feats=ts_feats,
             pos_t=pos_t,
             attn_layer=attn_layer,
-            top_k=top_k,
             timestep_idx=t,
             frame_number=frame_number,
             train_cameras=train_cameras,
@@ -881,7 +881,6 @@ def splat_graph_feat_queries(
             ts_feats=ts_feats,
             pos_t=pos_t,
             attn_layer=attn_layer,
-            top_k=top_k,
             timestep_idx=t,
             frame_number=frame_number,
             train_cameras=train_cameras,
@@ -902,6 +901,7 @@ def splat_graph_feat_queries(
 
     return results
 
+
 def _qwen25_patch_grid(im_height: int, im_width: int) -> tuple[int, int]:
     """Compute Qwen2.5-VL patch grid (H, W) for a given image size.
 
@@ -909,8 +909,12 @@ def _qwen25_patch_grid(im_height: int, im_width: int) -> tuple[int, int]:
     """
     PATCH_SIZE = qwen_vl.PATCH_SIZE
     EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
-    patches_height = im_height // EFFECTIVE_PATCH_SIZE + ((im_height // PATCH_SIZE) % 4 == 3)
-    patches_width = im_width // EFFECTIVE_PATCH_SIZE + ((im_width // PATCH_SIZE) % 4 == 3)
+    patches_height = im_height // EFFECTIVE_PATCH_SIZE + (
+        (im_height // PATCH_SIZE) % 4 == 3
+    )
+    patches_width = im_width // EFFECTIVE_PATCH_SIZE + (
+        (im_width // PATCH_SIZE) % 4 == 3
+    )
     return int(patches_height), int(patches_width)
 
 
@@ -932,7 +936,7 @@ def _patch_indices_to_pixel_centers(
     return np.stack([xs, ys], axis=-1)
 
 
-def _reorder_feats_by_frame_patches(
+def reorder_by_frame_patches(
     ts_feats: np.ndarray,
     pos_t: np.ndarray,
     train_cameras,
@@ -963,14 +967,15 @@ def _reorder_feats_by_frame_patches(
     new_to_orig = order
     return reordered_feats, new_to_orig
 
+
 def frame_attn_predict_query_list(
     queries_list,
     *,
     model,
     processor,
+    max_proposals: int,
     image: Image.Image,
     layers: List[int],
-    top_k: int,
     prompt_template: str,
     system_prompt: str,
 ):
@@ -993,12 +998,14 @@ def frame_attn_predict_query_list(
         for layer_idx, layer in enumerate(layers):
             layer_scores = attn_scores[layer_idx]  # [Q, V]
             layer_scores = layer_scores.mean(dim=0)  # [V]
-            top_scores, top_indices = layer_scores.topk(k=top_k, sorted=True)
+            top_scores, top_indices = layer_scores.topk(k=max_proposals, sorted=True)
             top_scores = top_scores.detach().cpu().numpy()
             top_indices = top_indices.detach().cpu().numpy()
 
             # Map patch indices to pixel centers
-            pixels = _patch_indices_to_pixel_centers(top_indices, image.height, image.width)
+            pixels = _patch_indices_to_pixel_centers(
+                top_indices, image.height, image.width
+            )
 
             out_item["predictions"][layer] = {
                 "scores": top_scores.tolist(),
@@ -1044,7 +1051,9 @@ def frame_attn_refine_predict_query_list(
         top_scores_np = top_scores.detach().cpu().numpy()
 
         # Map patch indices to pixel centers
-        pixels = _patch_indices_to_pixel_centers(top_indices_np, image.height, image.width)
+        pixels = _patch_indices_to_pixel_centers(
+            top_indices_np, image.height, image.width
+        )
 
         # Prepare refine prompt with proposals
         question = _format_only_substring(prompt_template_refine, substring)
@@ -1053,7 +1062,7 @@ def frame_attn_refine_predict_query_list(
                 lines = [
                     "Candidate pixel proposals (x, y) with attention scores:",
                     *[
-                        f"- {float(p[0]):.1f}, {float(p[1]):.1f} (score={float(s):.4f}, rank={i+1})"
+                        f"- {float(p[0]):.1f}, {float(p[1]):.1f} (score={float(s):.4f}, rank={i + 1})"
                         for i, (p, s) in enumerate(zip(pixels, top_scores_np))
                     ],
                 ]
@@ -1159,6 +1168,7 @@ def frame_attn_refine_feat_queries(
 
     return results
 
+
 def frame_attn_feat_queries(
     *,
     model,
@@ -1176,7 +1186,6 @@ def frame_attn_feat_queries(
     results: Dict[str, Any] = {}
     images_dir = Path(preprocessed_root) / clip.name / images_subdir
     layers = cfg.eval.spatial.layers
-    top_k = cfg.eval.spatial.top_k_scores
     prompt_template = cfg.eval.spatial.frame_attn_prompt_template
     system_prompt = cfg.eval.spatial.frame_attn_system_prompt
 
@@ -1195,7 +1204,7 @@ def frame_attn_feat_queries(
             processor=processor,
             image=image,
             layers=layers,
-            top_k=top_k,
+            max_proposals=cfg.eval.spatial.frame_attn_refine_max_proposals,
             prompt_template=prompt_template,
             system_prompt=system_prompt,
         )
@@ -1206,7 +1215,7 @@ def frame_attn_feat_queries(
             processor=processor,
             image=image,
             layers=layers,
-            top_k=top_k,
+            max_proposals=cfg.eval.spatial.frame_attn_refine_max_proposals,
             prompt_template=prompt_template,
             system_prompt=system_prompt,
         )
@@ -1273,7 +1282,16 @@ def dump_spatial_prediction_visualizations(
                     thickness=-1,
                 )
                 # Draw text
-                cv2.putText(img_bgr, label, (tx, ty), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+                cv2.putText(
+                    img_bgr,
+                    label,
+                    (tx, ty),
+                    font,
+                    font_scale,
+                    (255, 255, 255),
+                    thickness,
+                    cv2.LINE_AA,
+                )
         return img_bgr
 
     # Organize outputs under .../viz_dir/<method>/<clip>
@@ -1307,6 +1325,8 @@ def dump_spatial_prediction_visualizations(
                     if not coords:
                         continue
                     img = base_img.copy()
-                    img = _draw_points(img, coords, color_bgr=color, radius=5, draw_indices=True)
+                    img = _draw_points(
+                        img, coords, color_bgr=color, radius=5, draw_indices=True
+                    )
                     out_name = f"{frame_number:06d}_L{layer_str}_{group_name}_{_sanitize_filename(query)}.jpg"
                     cv2.imwrite(str(viz_root / out_name), img)
