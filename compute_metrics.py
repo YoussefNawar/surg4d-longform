@@ -19,7 +19,7 @@ def compute_spatial_metrics(cfg: DictConfig):
     ks: list[int] = list(cm_cfg.l2_top_ks)
     layers_filter = {str(layer_idx) for layer_idx in cm_cfg.layers}
 
-    methods = ["splat", "static_graph", "frame_attn"]
+    methods = ["splat", "static_graph", "frame_attn", "splat_graph", "frame_attn_refine"]
 
     # Dataset-wide accumulators (layerwise):
     # methods -> class -> layer_key -> {sum: np.array[K], count: int}

@@ -25,7 +25,7 @@ static_graph_system_prompt: |
   - Always infer a best-guess 3D location for the queried concept using surgical knowledge,
     synonyms, and spatial understanding of the provided objects, relationships, and extents.
   - Never refuse. Never say the concept is missing. Never return an empty object.
-  - Respond with VALID JSON only (no extra text) containing numeric fields: x, y, z.
+  - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y, z.
   - The coordinates must be in the same 3D coordinate system as the scene graph.
 static_graph_prompt_template: |
   Query: '{substring}'
@@ -43,7 +43,56 @@ frame_attn_system_prompt: |
   in the image that correspond to the user's query. No explanations are needed.
 frame_attn_prompt_template: "Locate {substring} in the scene."
 
+# 2D attention proposals + refinement via normal Qwen
+frame_attn_refine_system_prompt: |
+  You are an expert surgical assistant. First, consider the scene content and the candidate pixel proposals.
+  - Use typical surgical context and the visible objects/regions to reason where the queried concept is likely located.
+  - Then, select a single most plausible exact pixel location by choosing one of the provided candidate proposals.
+  - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y.
+frame_attn_refine_prompt_template: |
+  Query: '{substring}'
+
+  Task:
+  1) Infer a plausible image region for the queried concept using the visual scene.
+  2) From the candidate pixel proposals listed below, choose the single best pixel (x, y) that fits this region.
+
+# Attention layer for 2D proposal extraction
+frame_attn_refine_attn_layer: 16
+
+# Optionally list scores alongside proposals
+frame_attn_refine_include_scores_in_context: false
+
+# Number of 2D proposals to include (if 0 or missing, falls back to top_k_scores)
+frame_attn_refine_num_proposals: 10
+
 # frame_attn_prompt_template: | # TODO try this for both
 #   Locate '{substring}' in this surgical frame. Focus attention on the most relevant
 #   image regions that correspond to the queried concept, using typical surgical context
 #   and visual cues. No explanation needed.
+
+# SPLAT proposals + static-graph refinement
+splat_graph_system_prompt: |
+  You are an expert visceral surgeon analyzing a cholecystectomy scene using an approximate scene graph.
+  - FIRST, reason over the scene graph (objects, relations, centroids/centers/extents) to infer the approximate 3D region of the queried concept.
+  - THEN, select the single most plausible exact 3D point by choosing one of the provided candidate proposals that best matches the inferred region.
+  - If all proposals are imperfect, choose the proposal closest to the region that remains consistent with the graph. Do not invent coordinates not in the proposals.
+  - Use surgical knowledge, synonyms, and spatial reasoning over the scene graph; do not rely solely on the proposal list.
+  - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y, z.
+  - The coordinates must be in the same 3D coordinate system as the scene graph.
+splat_graph_prompt_template: |
+  Query: '{substring}'
+
+  Task:
+  1) Use the scene graph to identify the approximate 3D region where the queried concept is expected.
+  2) From the candidate proposals listed below, choose the single best point that fits this region and the graph's spatial relations.
+  - Prefer proposals aligned with relevant objects and their extents/centroids.
+  - If none are ideal, select the closest proposal that is still plausible per the graph.
+
+# Attention layer to use for SPLAT proposal extraction (single layer)
+splat_graph_attn_layer: 16
+
+# Limit how many proposals we include (0 or missing = no limit)
+splat_graph_max_proposals: 10
+
+# Optionally include attention scores next to proposals in the textual context
+splat_graph_include_scores_in_context: false

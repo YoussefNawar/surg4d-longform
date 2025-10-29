@@ -20,6 +20,8 @@ from benchmark.spatial import (
     dump_spatial_prediction_visualizations,
     static_graph_feat_queries,
     frame_attn_feat_queries,
+    splat_graph_feat_queries,
+    frame_attn_refine_feat_queries,
 )
 from rerun_utils import (
     init_and_save_rerun,
@@ -268,9 +270,35 @@ def evaluate_spatial(
         clip=clip,
         cfg=cfg,
     )
+    # SPLAT proposals + static graph refinement
+    results_splat_graph = splat_graph_feat_queries(
+        model_spatial=model_spatial,
+        processor_spatial=processor_spatial,
+        model=model,
+        processor=processor,
+        splat_feats=splat_feats,
+        splat_indices=splat_indices,
+        positions=positions,
+        graph_dir=graph_dir,
+        clip_gt=gt_data,
+        clip=clip,
+        cfg=cfg,
+    )
     results_frame_attn = frame_attn_feat_queries(
         model=model_spatial,
         processor=processor_spatial,
+        preprocessed_root=Path(cfg.preprocessed_root),
+        images_subdir=cfg.eval.paths.images_subdir,
+        clip_gt=gt_data,
+        clip=clip,
+        cfg=cfg,
+    )
+    # 2D attention proposals + refinement via normal Qwen
+    results_frame_attn_refine = frame_attn_refine_feat_queries(
+        model_spatial=model_spatial,
+        processor_spatial=processor_spatial,
+        model=model,
+        processor=processor,
         preprocessed_root=Path(cfg.preprocessed_root),
         images_subdir=cfg.eval.paths.images_subdir,
         clip_gt=gt_data,
@@ -283,6 +311,8 @@ def evaluate_spatial(
         "splat": results_splat,
         "static_graph": results_static_graph,
         "frame_attn": results_frame_attn,
+        "splat_graph": results_splat_graph,
+        "frame_attn_refine": results_frame_attn_refine,
     }
     out_dir = Path(cfg.eval.spatial.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -321,6 +351,26 @@ def evaluate_spatial(
             viz_dir=Path(cfg.eval.spatial.visualizations_dir),
             method_name="frame_attn",
         )
+        # And dump for splat+graph method
+        dump_spatial_prediction_visualizations(
+            results_splat=results_splat_graph,
+            clip_name=clip.name,
+            preprocessed_root=Path(cfg.preprocessed_root),
+            images_subdir=cfg.eval.paths.images_subdir,
+            gt_data=gt_data,
+            viz_dir=Path(cfg.eval.spatial.visualizations_dir),
+            method_name="splat_graph",
+        )
+        # And dump for frame_attn_refine method
+        dump_spatial_prediction_visualizations(
+            results_splat=results_frame_attn_refine,
+            clip_name=clip.name,
+            preprocessed_root=Path(cfg.preprocessed_root),
+            images_subdir=cfg.eval.paths.images_subdir,
+            gt_data=gt_data,
+            viz_dir=Path(cfg.eval.spatial.visualizations_dir),
+            method_name="frame_attn_refine",
+        )
 
     # Initialize rerun sink for spatial visualization
     init_and_save_rerun(graph_dir / "visualization_spatial.rrd")
@@ -339,6 +389,22 @@ def evaluate_spatial(
         clip_name=clip.name,
         positions_through_time=positions,
         results=results_static_graph,
+        cmap_name=cfg.eval.spatial.colormap,
+    )
+    # And log splat+graph results
+    log_spatial_predictions(
+        base_path="splat_graph",
+        clip_name=clip.name,
+        positions_through_time=positions,
+        results=results_splat_graph,
+        cmap_name=cfg.eval.spatial.colormap,
+    )
+    # And log frame_attn_refine results
+    log_spatial_predictions(
+        base_path="frame_attn_refine",
+        clip_name=clip.name,
+        positions_through_time=positions,
+        results=results_frame_attn_refine,
         cmap_name=cfg.eval.spatial.colormap,
     )
 
