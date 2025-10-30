@@ -42,7 +42,7 @@ def forward(
     cache_position: Optional[torch.LongTensor] = None,
     second_per_grid_ts: Optional[torch.Tensor] = None,
     **kwargs: Unpack[TransformersKwargs],
-) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
+    ) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
     r"""
     image_grid_thw (`torch.LongTensor` of shape `(num_images, 3)`, *optional*):
         The temporal, height and width of feature shape of each image in LLM.
@@ -130,6 +130,40 @@ def forward(
                 )
             delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=1)
             position_ids += delta.to(position_ids.device)
+
+    # Optional: override vision token position ids with custom patch assignments
+    # Expect kwargs["custom_vision_patch_positions"] as (num_vision_tokens, 3 [t,h,w]) per batch item
+    # and kwargs["custom_vision_token_indices"] as List[List[int]] token indices for vision placeholders
+    custom_patch_pos = kwargs.pop("custom_vision_patch_positions", None)
+    custom_tok_idx = kwargs.pop("custom_vision_token_indices", None)
+    if custom_patch_pos is not None and custom_tok_idx is not None and position_ids is not None:
+        # Ensure tensor on correct device/dtype
+        if not torch.is_tensor(custom_patch_pos):
+            custom_patch_pos = torch.as_tensor(custom_patch_pos, device=inputs_embeds.device)
+        custom_patch_pos = custom_patch_pos.to(device=inputs_embeds.device, dtype=position_ids.dtype)
+
+        # Handle batch = 1 common case; support lists per batch
+        if isinstance(custom_tok_idx, (list, tuple)) and len(custom_tok_idx) > 0 and isinstance(custom_tok_idx[0], (list, tuple)):
+            token_indices_per_batch = custom_tok_idx
+        else:
+            token_indices_per_batch = [custom_tok_idx]
+
+        batch_size = position_ids.shape[1]
+        # If a single positions tensor is provided, reuse for all batch items
+        per_batch_positions = [custom_patch_pos for _ in range(batch_size)]
+
+        for b in range(min(batch_size, len(token_indices_per_batch))):
+            tok_idx = token_indices_per_batch[b]
+            if tok_idx is None or len(tok_idx) == 0:
+                continue
+            # Expect shape (N, 3), slice if longer than tok count
+            pos_b = per_batch_positions[b]
+            if pos_b.dim() == 2 and pos_b.shape[-1] == 3:
+                # Align length
+                n = min(len(tok_idx), pos_b.shape[0])
+                assign = pos_b[:n].T  # (3, n)
+                # Overwrite t/h/w indices for the selected token positions
+                position_ids[:, b, tok_idx[:n]] = assign
 
     outputs = self.language_model(
         input_ids=None,
@@ -421,13 +455,12 @@ def model_inputs(
         messages, tokenize=False, add_generation_prompt=True
     )
 
-    # create some mock images so the processor precomputes correct image_grid_thw
-    # (we override actual features in model forward pass)
-    mock_images = []
+    # create mock images so the processor precomputes grid; features are passed as-is
+    mock_images: List[Image.Image] = []
     for i in range(len(vision_features)):
-        w, h = closest_factor_pair(vision_features[i].shape[0])
-        # print(f'{vision_features[i].shape[0]} features mocked by {w}x{h} image')
-        assert w * h == vision_features[i].shape[0]
+        n = int(vision_features[i].shape[0])
+        w, h = closest_factor_pair(n)
+        assert w * h == n
         mock_img = Image.new(
             "RGB", (EFFECTIVE_PATCH_SIZE * w, EFFECTIVE_PATCH_SIZE * h), color="red"
         )

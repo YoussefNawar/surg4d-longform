@@ -38,6 +38,9 @@ def extract_text_to_vision_attention(
     prompt: str,
     substring: str,
     system_prompt: str,
+    *,
+    vision_patch_positions: Optional[torch.Tensor] = None,
+    vision_patch_grid_thw: Optional[torch.Tensor] = None,
 ):
     """Extract attention scores from substring query tokens to vision tokens across layers.
 
@@ -75,18 +78,12 @@ def extract_text_to_vision_attention(
         model.device
     )
 
-    with torch.no_grad():
-        # Not generating any output tokens here
-        outputs = model(
-            **inputs,
-            output_attentions=True,
-            return_dict=True,
-            custom_patch_features=[vision_features],
+    if vision_patch_grid_thw is not None:
+        inputs["image_grid_thw"] = vision_patch_grid_thw.to(
+            model.device, dtype=inputs["image_grid_thw"].dtype
         )
 
-    all_attn = list(outputs.attentions)
-
-    # Identify vision token positions via <|image_pad|> placeholders
+    # Identify vision token positions via <|image_pad|> before forward (needed for custom pos ids)
     input_ids = inputs.input_ids[0]
     image_pad_token = processor.tokenizer.encode(
         "<|image_pad|>", add_special_tokens=False
@@ -95,6 +92,25 @@ def extract_text_to_vision_attention(
     if image_pad_positions.numel() == 0:
         raise ValueError("No <|image_pad|> tokens found in input sequence.")
     vision_token_indices = image_pad_positions.tolist()
+
+    with torch.no_grad():
+        # Not generating any output tokens here
+        model_kwargs = dict(
+            output_attentions=True,
+            return_dict=True,
+            custom_patch_features=[vision_features],
+        )
+        if vision_patch_positions is not None:
+            model_kwargs["custom_vision_patch_positions"] = vision_patch_positions
+            model_kwargs["custom_vision_token_indices"] = [vision_token_indices]
+        outputs = model(
+            **inputs,
+            **model_kwargs,
+        )
+
+    all_attn = list(outputs.attentions)
+
+    # vision_token_indices already computed above
 
     # Map substring to token indices by scanning decoded tokens and locating overlap
     tokens = [processor.tokenizer.decode([tid]) for tid in input_ids.tolist()]
@@ -263,6 +279,41 @@ def project_3d_to_2d(
     return pixels
 
 
+def project_3d_to_2d_and_mask(
+    positions: np.ndarray, proj_matrix: torch.Tensor, img_width: int, img_height: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project 3D positions to pixels and return an in-frame visibility mask.
+
+    Returns:
+        pixels: (N,2) float pixel coordinates (may fall outside if not masked)
+        in_frame_mask: (N,) boolean numpy array for points inside image and in front of camera
+    """
+    assert positions.shape[1] == 3, "Positions must be (N, 3)"
+
+    positions_t = torch.tensor(
+        positions, device=proj_matrix.device, dtype=proj_matrix.dtype
+    )
+    ones = torch.ones(
+        (positions_t.shape[0], 1), dtype=positions_t.dtype, device=positions_t.device
+    )
+    positions_h = torch.cat([positions_t, ones], dim=1)  # (N, 4)
+
+    coords = (proj_matrix.T @ positions_h.T).T  # (N, 4)
+    w = coords[:, 3]
+    ndc = coords[:, :3] / (w.unsqueeze(1) + 1e-7)
+
+    pixels_x = (ndc[:, 0] + 1.0) * 0.5 * img_width
+    pixels_y = (ndc[:, 1] + 1.0) * 0.5 * img_height
+    pixels = torch.stack([pixels_x, pixels_y], dim=-1)
+
+    in_front = w > 0
+    in_bounds_x = (pixels[..., 0] >= 0) & (pixels[..., 0] < img_width)
+    in_bounds_y = (pixels[..., 1] >= 0) & (pixels[..., 1] < img_height)
+    in_frame = (in_front & in_bounds_x & in_bounds_y).detach().cpu().numpy()
+
+    return pixels.detach().cpu().numpy(), in_frame
+
+
 def get_proj_matrix_from_timestep(
     timestep: int, train_cameras: list, frame: str
 ) -> torch.Tensor:
@@ -316,19 +367,52 @@ def splat_predict_query_list(
     train_cameras,
     prompt_template: str,
     system_prompt: str,
+    use_frame_patch_grid: bool = False,
 ):
     outputs = []
-    # Reorder features by projected frame patch indices (no aggregation)
-    reordered_feats, new_to_orig = reorder_by_frame_patches(
-        ts_feats=ts_feats,
-        pos_t=pos_t,
-        train_cameras=train_cameras,
-        frame_number=frame_number,
+    frame_idx = int(frame_number)
+    frame_name = f"frame_{frame_idx:06d}.jpg"
+    proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
+        frame_idx, train_cameras, frame_name
     )
-    feats_tensor = torch.tensor(reordered_feats, device=model.device)
+
+    patch_positions_tensor: Optional[torch.Tensor] = None
+    grid_thw_tensor: Optional[torch.Tensor] = None
+    if use_frame_patch_grid and ts_feats.shape[0] > 0:
+        pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)
+        pix_x = np.clip(np.round(pixels[:, 0]).astype(np.int64), 0, img_width - 1)
+        pix_y = np.clip(np.round(pixels[:, 1]).astype(np.int64), 0, img_height - 1)
+
+        ph, pw = _qwen25_patch_grid(img_height, img_width)
+        EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
+        cols = np.clip((pix_x // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
+        rows = np.clip((pix_y // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
+        patch_thw = np.stack([np.zeros_like(rows), rows, cols], axis=-1)
+
+        order = np.lexsort((np.arange(patch_thw.shape[0]), patch_thw[:, 2], patch_thw[:, 1]))
+        patch_thw = patch_thw[order]
+        ts_feats = ts_feats[order]
+        pos_t = pos_t[order]
+
+        patch_positions_tensor = torch.as_tensor(patch_thw, device=model.device)
+        grid_thw_tensor = torch.tensor(
+            [[1, ph, pw]], dtype=torch.long, device=model.device
+        )
+
+    feats_tensor = torch.tensor(ts_feats, device=model.device)
     for query in queries_list:
         substring = query["query"]
         prompt = prompt_template.format(substring=substring)
+        if feats_tensor.shape[0] == 0:
+            out_item = {"query": substring, "predictions": {}}
+            for layer in layers:
+                out_item["predictions"][layer] = {
+                    "scores": [],
+                    "pixel_coords": [],
+                    "positions": [],
+                }
+            outputs.append(out_item)
+            continue
         attn_out = extract_text_to_vision_attention(
             model=model,
             processor=processor,
@@ -337,6 +421,8 @@ def splat_predict_query_list(
             prompt=prompt,
             substring=substring,
             system_prompt=system_prompt,
+            vision_patch_positions=patch_positions_tensor,
+            vision_patch_grid_thw=grid_thw_tensor,
         )
         attn_scores = attn_out["scores"]
 
@@ -348,16 +434,9 @@ def splat_predict_query_list(
             top_scores = top_scores.detach().cpu().numpy()
             top_indices = top_indices.detach().cpu().numpy()
 
-            # Map back to original indices
-            orig_indices = new_to_orig[top_indices]
-            top_positions = pos_t[orig_indices]
+            # Directly index positions by attention-ranked indices
+            top_positions = pos_t[top_indices]
 
-            # Use frame_number directly from GT (assumed local zero-based index)
-            local_idx = int(frame_number)
-            frame_name = f"frame_{local_idx:06d}.jpg"
-            proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
-                local_idx, train_cameras, frame_name
-            )
             top_pixels = project_3d_to_2d(
                 top_positions, proj_matrix, img_width, img_height
             )
@@ -389,6 +468,7 @@ def splat_feat_queries(
 
     results = {}
     splat_system_prompt = cfg.eval.spatial.splat_system_prompt
+    use_frame_grid = bool(getattr(cfg.eval.spatial, "use_frame_patch_grid_for_splat", False))
 
     for timestep, timestep_queries in clip_gt.items():
         t = int(timestep)
@@ -415,6 +495,7 @@ def splat_feat_queries(
             train_cameras=train_cameras,
             prompt_template=prompt_template,
             system_prompt=splat_system_prompt,
+            use_frame_patch_grid=use_frame_grid,
         )
 
         results[timestep]["actions"] = splat_predict_query_list(
@@ -430,6 +511,7 @@ def splat_feat_queries(
             train_cameras=train_cameras,
             prompt_template=prompt_template,
             system_prompt=splat_system_prompt,
+            use_frame_patch_grid=use_frame_grid,
         )
 
     return results
@@ -688,6 +770,7 @@ def splat_graph_predict_query_list(
     prompt_template_graph: str,
     max_proposals: int | None = None,
     include_scores_in_context: bool = False,
+    use_frame_patch_grid: bool = False,
 ):
     """Use SPLAT attention to propose 3D points, then refine via static-graph prompting.
 
@@ -701,48 +784,69 @@ def splat_graph_predict_query_list(
         int(frame_number), train_cameras, frame_name
     )
 
-    # Prepare features reordered by frame patches for attention
-    reordered_feats, new_to_orig = reorder_by_frame_patches(
-        ts_feats=ts_feats,
-        pos_t=pos_t,
-        train_cameras=train_cameras,
-        frame_number=frame_number,
-    )
-    feats_tensor = torch.tensor(reordered_feats, device=model_spatial.device)
+    patch_positions_tensor: Optional[torch.Tensor] = None
+    grid_thw_tensor: Optional[torch.Tensor] = None
+    if use_frame_patch_grid and ts_feats.shape[0] > 0:
+        pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)
+        pix_x = np.clip(np.round(pixels[:, 0]).astype(np.int64), 0, img_width - 1)
+        pix_y = np.clip(np.round(pixels[:, 1]).astype(np.int64), 0, img_height - 1)
+
+        ph, pw = _qwen25_patch_grid(img_height, img_width)
+        EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
+        cols = np.clip((pix_x // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
+        rows = np.clip((pix_y // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
+        patch_thw = np.stack([np.zeros_like(rows), rows, cols], axis=-1)
+
+        order = np.lexsort((np.arange(patch_thw.shape[0]), patch_thw[:, 2], patch_thw[:, 1]))
+        patch_thw = patch_thw[order]
+        ts_feats = ts_feats[order]
+        pos_t = pos_t[order]
+
+        patch_positions_tensor = torch.as_tensor(patch_thw, device=model_spatial.device)
+        grid_thw_tensor = torch.tensor(
+            [[1, ph, pw]], dtype=torch.long, device=model_spatial.device
+        )
+
+    feats_tensor = torch.tensor(ts_feats, device=model_spatial.device)
 
     for query in queries_list:
         substring = query["query"]
         prompt_attn = prompt_template_attn.format(substring=substring)
-        attn_out = extract_text_to_vision_attention(
-            model=model_spatial,
-            processor=processor_spatial,
-            vision_features=feats_tensor,
-            layers=[attn_layer],
-            prompt=prompt_attn,
-            substring=substring,
-            system_prompt=system_prompt_splat_attn,
-        )
-        attn_scores = attn_out["scores"]  # [1, Q, V]
-
-        # Collect proposals across layers (average over query tokens)
-        proposals_list: list[dict] = []
-        layer_scores = attn_scores[0].mean(dim=0)  # [V], mean over query tokens only
-        top_scores, top_indices = layer_scores.topk(k=max_proposals, sorted=True)
-        top_indices_np = top_indices.detach().cpu().numpy()
-        top_scores_np = top_scores.detach().cpu().numpy()
-        orig_indices = new_to_orig[top_indices_np]
-        for rank_idx, (orig_i, score_val) in enumerate(
-            zip(orig_indices, top_scores_np)
-        ):
-            xyz = pos_t[orig_i]
-            proposals_list.append(
-                {
-                    "xyz": xyz,
-                    "score": float(score_val),
-                    "layer": int(attn_layer),
-                    "rank": int(rank_idx + 1),
-                }
+        if feats_tensor.shape[0] == 0:
+            proposals_list = []
+        else:
+            attn_out = extract_text_to_vision_attention(
+                model=model_spatial,
+                processor=processor_spatial,
+                vision_features=feats_tensor,
+                layers=[attn_layer],
+                prompt=prompt_attn,
+                substring=substring,
+                system_prompt=system_prompt_splat_attn,
+                vision_patch_positions=patch_positions_tensor,
+                vision_patch_grid_thw=grid_thw_tensor,
             )
+            attn_scores = attn_out["scores"]  # [1, Q, V]
+
+            # Collect proposals across layers (average over query tokens)
+            proposals_list = []
+            layer_scores = attn_scores[0].mean(dim=0)  # [V], mean over query tokens only
+            k = max_proposals if max_proposals is not None else layer_scores.shape[-1]
+            top_scores, top_indices = layer_scores.topk(k=k, sorted=True)
+            top_indices_np = top_indices.detach().cpu().numpy()
+            top_scores_np = top_scores.detach().cpu().numpy()
+            for rank_idx, (orig_i, score_val) in enumerate(
+                zip(top_indices_np, top_scores_np)
+            ):
+                xyz = pos_t[orig_i]
+                proposals_list.append(
+                    {
+                        "xyz": xyz,
+                        "score": float(score_val),
+                        "layer": int(attn_layer),
+                        "rank": int(rank_idx + 1),
+                    }
+                )
 
         # Build question for static-graph step, embedding proposals textually
         question = _format_only_substring(prompt_template_graph, substring)
@@ -841,6 +945,7 @@ def splat_graph_feat_queries(
     include_scores = cfg.eval.spatial.splat_graph_include_scores_in_context
 
     results: Dict[str, Any] = {}
+    use_frame_grid = bool(getattr(cfg.eval.spatial, "use_frame_patch_grid_for_splat_graph", False))
     for timestep, timestep_queries in clip_gt.items():
         t = int(timestep)
         ts_feats = splat_feats[t]
@@ -872,6 +977,7 @@ def splat_graph_feat_queries(
             prompt_template_graph=prompt_template_graph,
             max_proposals=max_props,
             include_scores_in_context=include_scores,
+            use_frame_patch_grid=use_frame_grid,
         )
 
         results[timestep]["actions"] = splat_graph_predict_query_list(
@@ -897,6 +1003,7 @@ def splat_graph_feat_queries(
             prompt_template_graph=prompt_template_graph,
             max_proposals=max_props,
             include_scores_in_context=include_scores,
+            use_frame_patch_grid=use_frame_grid,
         )
 
     return results
@@ -936,36 +1043,34 @@ def _patch_indices_to_pixel_centers(
     return np.stack([xs, ys], axis=-1)
 
 
-def reorder_by_frame_patches(
-    ts_feats: np.ndarray,
+def _compute_gaussian_patch_assignment_thw(
+    *,
     pos_t: np.ndarray,
     train_cameras,
     frame_number: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Reorder features by projected frame patch index without aggregating.
+) -> np.ndarray:
+    """Return per-gaussian [t,h,w] indices on the frame's Qwen patch grid (no filtering).
 
-    Returns (reordered_feats, new_to_orig_idx), where new_to_orig_idx maps from
-    reordered token index back to the original ts_feats/pos_t index.
+    t is fixed to 0. h,w are computed by projecting to pixels, clamping to the frame,
+    then mapping to Qwen's EFFECTIVE_PATCH_SIZE grid and bounding within [0..H-1],[0..W-1].
     """
     local_idx = int(frame_number)
     frame_name = f"frame_{local_idx:06d}.jpg"
     proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
         local_idx, train_cameras, frame_name
     )
-    pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)  # (N,2)
+
+    pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)
+    pix_x = np.clip(np.round(pixels[:, 0]).astype(np.int64), 0, img_width - 1)
+    pix_y = np.clip(np.round(pixels[:, 1]).astype(np.int64), 0, img_height - 1)
 
     EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
     ph, pw = _qwen25_patch_grid(img_height, img_width)
 
-    cols = np.clip((pixels[:, 0] // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
-    rows = np.clip((pixels[:, 1] // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
-    # Stable order by (row, col) to mimic row-major patch scanning
-    order = np.lexsort((cols, rows))
-    reordered_feats = ts_feats[order]
-
-    # Map from new index -> original index
-    new_to_orig = order
-    return reordered_feats, new_to_orig
+    cols = np.clip((pix_x // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
+    rows = np.clip((pix_y // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
+    t = np.zeros_like(rows)
+    return np.stack([t, rows, cols], axis=-1)
 
 
 def frame_attn_predict_query_list(
