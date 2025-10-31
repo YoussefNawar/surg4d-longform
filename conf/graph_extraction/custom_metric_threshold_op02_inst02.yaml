@@ -1,17 +1,17 @@
-graph_output_subdir: graph_newmetric
+graph_output_subdir: custom_metric_threshold_op02_inst02
 
 load_stage: fine-lang
 iteration: -1
 
 # TODO we likely want to filter initially based on opacity * instance feature norm
-opacity_threshold: 0.03
-inst_feat_norm_threshold: 0.03
+opacity_threshold: 0.02
+inst_feat_norm_threshold: 0.02
 
 custom_cluster_metric: true # ! does not run on camp due to too little RAM
 clustering_weights:
   position: 1.0
   instance: 0.6
-cluster_min_size: 150  # Larger values = fewer, larger clusters
+cluster_min_size: 70  # Larger values = fewer, larger clusters
 cluster_min_samples: 150  # Larger values = more conservative clustering
 cluster_metric: euclidean
 
@@ -50,8 +50,8 @@ latent_dim: ${autoencoder.latent_dim}
 # Mask-based cluster filtering of clusters by comparing rendered cluster masks
 # against precomputed instance masks in the preprocessed clip directory.
 mask_filtering:
-  enabled: false           # disabled by default; enable to filter clusters by masks
+  enabled: true           # disabled by default; enable to filter clusters by masks
   metric: coverage         # one of: [coverage, iou]
-  threshold: 0.8           # minimum required score for the chosen metric
+  threshold: 0.6           # minimum required score for the chosen metric
   mask_subdir: instance_masks  # relative to {preprocessed_root}/{clip.name}
   min_component_area: 50   # ignore tiny connected components in instance masks

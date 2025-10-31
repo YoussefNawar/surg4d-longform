@@ -1,13 +1,13 @@
 defaults:
-  - triplets: default
-  # - temporal: default
-  # - spatial: default
+  # - triplets: default
+  - temporal: default
+  - spatial: default
   - _self_
 
 # nulling skips - comment out to enable
-# triplets: null
-temporal: null
-spatial: null
+triplets: null
+# temporal: null
+# spatial: null
 
 # Quantization settings for the evaluation model (used across all eval stages)
 use_bnb_4bit: false
@@ -26,7 +26,7 @@ paths:
   images_subdir: "images"
   
   # Subdirectory within output clip dir that contains graph data
-  graph_subdir: ${graph_extraction.graph_output_subdir}
+  graph_subdir: "graph_hailmary_final"
   
   # Can override these per evaluation type if needed
   # e.g., different graph subdirs for different ablations

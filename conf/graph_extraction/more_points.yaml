@@ -1,4 +1,4 @@
-graph_output_subdir: graph_newmetric
+graph_output_subdir: graph_morepoints
 
 load_stage: fine-lang
 iteration: -1
@@ -7,10 +7,10 @@ iteration: -1
 opacity_threshold: 0.03
 inst_feat_norm_threshold: 0.03
 
-custom_cluster_metric: true # ! does not run on camp due to too little RAM
+custom_cluster_metric: false # ! does not run on camp due to too little RAM
 clustering_weights:
-  position: 1.0
-  instance: 0.6
+  position: 1.0  # Weight spatial features more than instance features
+  instance: 2.0  # Reduce this if instance features are poorly trained (e.g., 0.5 or 0.1)
 cluster_min_size: 150  # Larger values = fewer, larger clusters
 cluster_min_samples: 150  # Larger values = more conservative clustering
 cluster_metric: euclidean

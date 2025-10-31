@@ -8,14 +8,15 @@ defaults:
   - eval: default
   - compute_metrics: default
   - _self_
+  
 
-skip_preprocessing: false
-skip_feature_extraction: false
-skip_autoencoder: false
-skip_splat: false
+skip_preprocessing: true
+skip_feature_extraction: true
+skip_autoencoder: true
+skip_splat: true
 skip_graph_extraction: false
-skip_eval: true
-skip_compute_metrics: true
+skip_eval: false
+skip_compute_metrics: false
 
 cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k

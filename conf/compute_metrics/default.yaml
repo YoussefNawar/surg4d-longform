@@ -1,11 +1,11 @@
 defaults:
-  - triplets: default
+  # - triplets: default
   - temporal: default
   - spatial: default
   - _self_
 
 # nulling skips - comment out to enable
-# triplets: null
+triplets: null
 # temporal: null
 # spatial: null
 
