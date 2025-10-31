@@ -71,9 +71,14 @@ def forward(
     if inputs_embeds is None:
         inputs_embeds = self.get_input_embeddings()(input_ids)
 
+    # Track whether custom vision features are being used and capture mask safely
+    image_mask = None
+    using_custom_vision_features = False
+
     if pixel_values is not None:
         if "custom_patch_features" in kwargs:
             image_embeds = kwargs["custom_patch_features"]
+            using_custom_vision_features = True
         else:
             image_embeds = self.get_image_features(pixel_values, image_grid_thw)
         image_embeds = torch.cat(image_embeds, dim=0).to(
@@ -164,6 +169,30 @@ def forward(
                 assign = pos_b[:n].T  # (3, n)
                 # Overwrite t/h/w indices for the selected token positions
                 position_ids[:, b, tok_idx[:n]] = assign
+
+    # Always zero out positional encodings for any custom vision tokens
+    # When using custom patch features, relative patch geometry should not affect prompts
+    if using_custom_vision_features and (position_ids is not None):
+        # If we have the image_mask from placeholder computation, derive token indices
+        if image_mask is not None:
+            token_mask = image_mask.any(dim=-1)  # (batch, seq)
+            if token_mask.ndim == 2:
+                for b in range(token_mask.shape[0]):
+                    tok_idx_b = torch.nonzero(token_mask[b], as_tuple=False).squeeze(-1)
+                    if tok_idx_b.numel() > 0:
+                        position_ids[:, b, tok_idx_b] = 0
+        # Also support explicit token indices if provided
+        if custom_tok_idx is not None:
+            if isinstance(custom_tok_idx, (list, tuple)) and len(custom_tok_idx) > 0 and isinstance(custom_tok_idx[0], (list, tuple)):
+                token_indices_per_batch = custom_tok_idx
+            else:
+                token_indices_per_batch = [custom_tok_idx]
+            batch_size = position_ids.shape[1]
+            for b in range(min(batch_size, len(token_indices_per_batch))):
+                tok_idx = token_indices_per_batch[b]
+                if tok_idx is None or len(tok_idx) == 0:
+                    continue
+                position_ids[:, b, tok_idx] = 0
 
     outputs = self.language_model(
         input_ids=None,
