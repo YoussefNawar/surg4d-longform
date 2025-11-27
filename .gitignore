@@ -15,3 +15,5 @@ outputs/
 multirun/
 benchmark/results/
 labeling/clips/
+start.sh
+slurm_logs/
