@@ -3,28 +3,41 @@ graph_output_subdir: graph
 load_stage: fine-lang
 iteration: -1
 
-# TODO we likely want to filter initially based on opacity * instance feature norm
+# gaussian filtering before clustering
 opacity_threshold: 0.03
 inst_feat_norm_threshold: 0.03
 
+# clustering
+# "custom metric" does cos dist on lang part and l2 on pos part
+# "vanilla metric" concats both and does whatever metric is set
 custom_cluster_metric: false # ! does not run on camp due to too little RAM
 clustering_weights:
-  position: 1.0  # Weight spatial features more than instance features
-  instance: 2.0  # Reduce this if instance features are poorly trained (e.g., 0.5 or 0.1)
-cluster_min_size: 150  # Larger values = fewer, larger clusters
-cluster_min_samples: 150  # Larger values = more conservative clustering
-cluster_metric: euclidean
+  position: 1.0
+  instance: 2.0
+custom_metric_hdbscan_args:
+  metric: precomputed
+  min_cluster_size: 150
+  min_samples: 150
+  cluster_selection_method: leaf # "eom" is default
+vanilla_metric_hdbscan_args:
+  metric: euclidean
+  min_cluster_size: 150
+  min_samples: 150
+  cluster_selection_method: leaf # "eom" is default
 
-min_gaussians_per_cluster: 150 # TODO this is redundant with hdbscan min cluster size
 
+# how many vision features represent each cluster
 max_features_per_cluster: 40
 min_features_per_cluster: 4
+
+# lf decoding
 decode_batch_size: 1024
 
-n_timesteps: 20 # graph timesteps
+# graph
+n_timesteps: 20
+graph_edge_threshold: 0.05 # edge if bhattacharyya coefficient >= threshold
 
-graph_edge_threshold: 0.05 # minimum bhattacharyya coefficient to create an edge between clusters
-
+# outputs
 store_verbose: true  # save verbose outputs (renders, palettes, raw gaussians, etc.)
 n_render_views: 1  # number of random camera views to render (only if store_verbose is true)
 

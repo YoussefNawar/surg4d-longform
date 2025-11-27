@@ -227,12 +227,16 @@ def cluster_distances(
     for norm_lf in norm_lf_at_timestep:
         d_lf = 1 - (norm_lf @ norm_lf.T)
         d_lf = (d_lf - d_lf.min()) / (d_lf.max() - d_lf.min())
-        dist_matrix = dist_matrix + d_lf * cfg.graph_extraction.clustering_weights.instance
+        dist_matrix = (
+            dist_matrix + d_lf * cfg.graph_extraction.clustering_weights.instance
+        )
 
     for positions in positions_at_timestep:
         d_pos = pairwise_distances(positions, positions, metric="euclidean")
         d_pos = (d_pos - d_pos.min()) / (d_pos.max() - d_pos.min())
-        dist_matrix = dist_matrix + d_pos * cfg.graph_extraction.clustering_weights.position
+        dist_matrix = (
+            dist_matrix + d_pos * cfg.graph_extraction.clustering_weights.position
+        )
 
     return dist_matrix
 
@@ -246,9 +250,7 @@ def cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
             cfg=cfg,
         )
         clusters = HDBSCAN(
-            min_cluster_size=cfg.graph_extraction.cluster_min_size,
-            metric="precomputed",
-            min_samples=cfg.graph_extraction.cluster_min_samples,
+            **cfg.graph_extraction.custom_metric_hdbscan_args
         ).fit_predict(dist_matrix)
     else:
         # position
@@ -274,9 +276,7 @@ def cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
             axis=1,
         )
         clusters = HDBSCAN(
-            min_cluster_size=cfg.graph_extraction.cluster_min_size,
-            metric=cfg.graph_extraction.cluster_metric,
-            min_samples=cfg.graph_extraction.cluster_min_samples,
+            **cfg.graph_extraction.vanilla_metric_hdbscan_args
         ).fit_predict(clustering_feats)
 
     return clusters
@@ -941,7 +941,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     np.savez(
         out / "cluster_spatial_grounding_indices.npz", **cluster_indices
     )  # (cluster_id -> (n_feats,)) (ATTENTION: indices are into cluster gaussians, not the whole splat)
-    np.save(out / "positions.npy", pos_through_time) # (T, n_filtered_gaussians, 3)
+    np.save(out / "positions.npy", pos_through_time)  # (T, n_filtered_gaussians, 3)
     np.save(out / "clusters.npy", clusters)  # (n_filtered_gaussians,)
 
     # Visualize to rerun
