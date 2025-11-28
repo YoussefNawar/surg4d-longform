@@ -20,7 +20,12 @@ import copy
 from scene.cameras import Camera
 from utils.params_utils import merge_hparams
 from arguments import ModelParams, PipelineParams, ModelHiddenParams
-from cluster_utils import store_palette, clusters_to_rgb
+from cluster_utils import (
+    store_palette,
+    clusters_to_rgb,
+    build_graph,
+    ng_jordan_weiss_spectral_clustering,
+)
 from scene import GaussianModel, Scene
 from gaussian_renderer import render as gs_render
 from gaussian_renderer import render_opacity as gs_render_opacity
@@ -253,32 +258,39 @@ def cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
             **cfg.graph_extraction.custom_metric_hdbscan_args
         ).fit_predict(dist_matrix)
     else:
-        # position
-        pos_through_time = np.concatenate(
-            [
-                normalize_indep_dim(deform_at_timestep(gaussians, t)[0])
-                for t in [0.0, 0.5, 1.0]
-            ],
-            axis=-1,
-        )
-        pos_through_time /= 9
-
-        # instance language features
-        _, _, instance_features = deform_at_timestep(gaussians, 0.5)
-        instance_features = normalize_dep_dim(instance_features)
-        instance_features /= 3
-
+        # pos
+        deformed_data = [deform_at_timestep(gaussians, t) for t in [0.0, 0.5, 1.0]]
+        pos_through_time = np.concatenate([normalize_dep_dim(i[0]) for i in deformed_data], axis=-1)
+        instance_features = normalize_dep_dim(deformed_data[0][2])
         clustering_feats = np.concatenate(
             [
-                cfg.graph_extraction.clustering_weights.position * pos_through_time,
-                cfg.graph_extraction.clustering_weights.instance * instance_features,
+                cfg.graph_extraction.clustering_weights.position * (pos_through_time / 9),
+                cfg.graph_extraction.clustering_weights.instance * (instance_features / 3),
             ],
-            axis=1,
+            axis=-1,
         )
         clusters = HDBSCAN(
             **cfg.graph_extraction.vanilla_metric_hdbscan_args
         ).fit_predict(clustering_feats)
 
+    return clusters
+
+
+def spectral_cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
+    # TODO potentially do through time
+    pos, _, lf_instance = deform_at_timestep(gaussians, 0.0)
+    graph = build_graph(
+        positions=pos,
+        normalized_lf=lf_instance,
+        k=cfg.graph_extraction.spectral_clustering.knn_graph_k,
+        weight_pos=cfg.graph_extraction.clustering_weights.position,
+        weight_lf=cfg.graph_extraction.clustering_weights.instance,
+    )
+    clusters = ng_jordan_weiss_spectral_clustering(
+        graph,
+        spectral_embedding_dim=cfg.graph_extraction.spectral_clustering.spectral_embedding_dim,
+        hdbscan_args=cfg.graph_extraction.spectral_clustering.hdbscan_args,
+    )
     return clusters
 
 
@@ -807,18 +819,22 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     # Load model
     gaussians, scene, dataset, args, pipeline = load_gaussian_model(clip, cfg)
 
-    # Gaussian filtering
-    opacity_mask = (
-        gaussians.get_opacity > cfg.graph_extraction.opacity_threshold
-    ).squeeze()
-    inst_feat_norm_mask = (
-        gaussians.get_language_feature[:, 3:].norm(dim=-1)
-        > cfg.graph_extraction.inst_feat_norm_threshold
-    ).squeeze()
-    filter_gaussians(gaussians, opacity_mask & inst_feat_norm_mask)
+    # gaussian filtering before clustering
+    with torch.no_grad():
+        opacity = gaussians.get_opacity.squeeze()  # (N,)
+        lang = gaussians.get_language_feature      # (N, D_latent)
+        lang_norm = lang.norm(dim=-1)              # (N,)
+        relevance = opacity * lang_norm
+        mask = relevance >= cfg.graph_extraction.relevance_threshold
+    filter_gaussians(gaussians, mask)
 
     # Cluster, filter clusters, optional mask-based filtering, then drop -1s
-    clusters = cluster_gaussians(gaussians, cfg=cfg)
+    if cfg.graph_extraction.cluster_method == "hdbscan":
+        clusters = cluster_gaussians(gaussians, cfg=cfg)
+    elif cfg.graph_extraction.cluster_method == "spectral":
+        clusters = spectral_cluster_gaussians(gaussians, cfg=cfg)
+    else:
+        raise ValueError(f"Invalid cluster method: {cfg.graph_extraction.cluster_method}")
     filter_clusters(clusters, cfg)
 
     # Optional: mask-based cluster filtering (coverage or IoU)

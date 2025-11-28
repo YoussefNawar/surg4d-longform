@@ -9,6 +9,7 @@ import seaborn as sns
 from scipy.linalg import eig, eigh
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigs, eigsh
+from scipy.sparse.csgraph import connected_components
 from sklearn.metrics import pairwise_distances
 from sklearn.cluster import HDBSCAN
 from sklearn.neighbors import kneighbors_graph
@@ -75,9 +76,7 @@ def laplacian_sym(A):
     return normalized_L
 
 
-def spectral_embeddings(
-    L, d, normalize_rows: bool, use_symmetric_eigensolver: bool
-):
+def spectral_embeddings(L, d, normalize_rows: bool, use_symmetric_eigensolver: bool):
     """Spectral embeddings.
 
     Args:
@@ -130,7 +129,9 @@ def unnormalized_spectral_clustering(A, min_cluster_size=1000, seed=42):
         Clusters (n,)
     """
     L = laplacian(A)
-    T = spectral_embeddings(L, d=None, normalize_rows=False, use_symmetric_eigensolver=True)
+    T = spectral_embeddings(
+        L, d=None, normalize_rows=False, use_symmetric_eigensolver=True
+    )
     hdbscan = HDBSCAN(min_cluster_size=min_cluster_size, metric="euclidean", seed=seed)
     clusters = hdbscan.fit_predict(T)
     return clusters
@@ -150,31 +151,70 @@ def shi_malik_spectral_clustering(A, min_cluster_size=1000, seed=42):
         Clusters (n,)
     """
     L = laplacian_rw(A)
-    T = spectral_embeddings(L, d=None, normalize_rows=False, use_symmetric_eigensolver=False)
+    T = spectral_embeddings(
+        L, d=None, normalize_rows=False, use_symmetric_eigensolver=False
+    )
     hdbscan = HDBSCAN(min_cluster_size=min_cluster_size, metric="euclidean", seed=seed)
     clusters = hdbscan.fit_predict(T)
     return clusters
 
 
-def ng_jordan_weiss_spectral_clustering(A, min_cluster_size=100, d_spectral=8):
+def ng_jordan_weiss_spectral_clustering(A, spectral_embedding_dim: int, hdbscan_args: dict):
     """Spectral clustering with symmetric, normalized Laplacian.
     Heuristically approximates normalized cut (not principled like Shi-Malik),
     but is faster because it uses a symmetric eigensolver.
+    
+    Handles disconnected graphs by clustering each connected component separately.
 
     Args:
         A: Adjacency matrix (n x n)
-        min_cluster_size: Minimum cluster size
-        seed: Random seed
+        spectral_embedding_dim: Number of eigenvectors for embedding
+        hdbscan_args: Arguments for HDBSCAN clustering
 
     Returns:
         Clusters (n,)
     """
-    L = laplacian_sym(A)
-    print("Computing spectral embeddings...")
-    T = spectral_embeddings(L, d=d_spectral, normalize_rows=True, use_symmetric_eigensolver=True)
-    print("Fitting HDBSCAN...")
-    hdbscan = HDBSCAN(min_cluster_size=min_cluster_size, metric="euclidean")
-    clusters = hdbscan.fit_predict(T)
+    n_samples = A.shape[0]
+    n_components, component_labels = connected_components(A, directed=False)
+    
+
+    # plain spectral clustering if graph is connected
+    if n_components == 1:
+        L = laplacian_sym(A)
+        T = spectral_embeddings(
+            L, d=spectral_embedding_dim, normalize_rows=True, use_symmetric_eigensolver=True
+        )
+        clusters = HDBSCAN(**hdbscan_args).fit_predict(T)
+        return clusters
+    
+    # cluster separately if disconnected graph
+    clusters = np.full(n_samples, -1, dtype=np.int32)
+    cluster_offset = 0
+    for comp_id in range(n_components):
+        comp_mask = component_labels == comp_id
+        comp_size = comp_mask.sum()
+        
+        # throw away component if smaller than min cluster size
+        if comp_size < hdbscan_args["min_cluster_size"] or comp_size <= spectral_embedding_dim + 1:
+            continue
+        
+        # subgraph
+        comp_indices = np.where(comp_mask)[0]
+        A_sub = A[comp_indices][:, comp_indices]
+        
+        # cluster
+        L_sub = laplacian_sym(A_sub)
+        d = min(spectral_embedding_dim, comp_size - 1)
+        T_sub = spectral_embeddings(
+            L_sub, d=d, normalize_rows=True, use_symmetric_eigensolver=True
+        )
+        comp_clusters = HDBSCAN(**hdbscan_args).fit_predict(T_sub)
+        
+        # Map back to original indices, offsetting cluster IDs
+        valid_mask = comp_clusters >= 0
+        clusters[comp_indices[valid_mask]] = comp_clusters[valid_mask] + cluster_offset
+        cluster_offset += comp_clusters.max() + 1 if valid_mask.any() else 0
+    
     return clusters
 
 
@@ -203,41 +243,41 @@ def clusters_to_rgb(clusters):
     return pal[clusters], pal
 
 
-def build_graph(positions, language_latent_features, k):
-    # knn position graph
+def build_graph(
+    positions: np.ndarray,
+    normalized_lf: np.ndarray,
+    k: int,
+    weight_pos: float,
+    weight_lf: float,
+):
+    # knn position graph (L2)
     knn_position = kneighbors_graph(
         positions, n_neighbors=k, mode="distance"
     )  # scipy sparse csr (n, n)
     knn_position /= knn_position.max()
+    knn_position.data = 1 - knn_position.data # we need similarity graph not distance graph
 
-    # language feature distances for knn edges
+    # knn language graph (cos dist)
     n_samples = knn_position.shape[0]
     indptr = knn_position.indptr
     indices = knn_position.indices
-    row_idx = []
-    col_idx = []
-    data = []
+    data_lf = np.empty(len(indices), dtype=normalized_lf.dtype)
     for i in range(n_samples):
         start, end = indptr[i], indptr[i + 1]
         neighbors = indices[start:end]
-        if neighbors.size == 0:
-            continue
-        dists = pairwise_distances(
-            language_latent_features[i : i + 1],
-            language_latent_features[neighbors],
-            metric="euclidean",
-        ).ravel()  # 1 x k distances for this row's neighbors
-        row_idx.extend([i] * len(neighbors))
-        col_idx.extend(neighbors.tolist())
-        data.extend(dists.tolist())
+        if neighbors.size > 0:
+            cos_sim = normalized_lf[i] @ normalized_lf[neighbors].T
+            data_lf[start:end] = 1 - cos_sim
     knn_language = sp.csr_matrix(
-        (data, (row_idx, col_idx)), shape=(n_samples, n_samples)
+        (data_lf, indices, indptr), shape=(n_samples, n_samples)
     )
     knn_language /= knn_language.max()
+    knn_language.data = 1 - knn_language.data # we need similarity graph not distance graph
 
-    # combine
-    graph = (knn_position + knn_language) * 0.5
+    graph = weight_pos * knn_position + weight_lf * knn_language
+    graph = graph.minimum(graph.T) # needs to be symmetric
     return graph
+
 
 def store_palette(palette, path):
     """Store color palette as a PNG image."""
