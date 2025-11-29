@@ -71,12 +71,13 @@ def forward(
     if inputs_embeds is None:
         inputs_embeds = self.get_input_embeddings()(input_ids)
 
-    # Pull custom features from kwargs (and persist as fallback across decoding steps)
+    # Get custom features from kwargs or from attribute (set externally for generation)
     custom_patch_features = kwargs.pop("custom_patch_features", None)
-    if custom_patch_features is not None:
-        setattr(self, "_custom_patch_features", custom_patch_features)
-    elif hasattr(self, "_custom_patch_features"):
-        custom_patch_features = getattr(self, "_custom_patch_features")
+    if custom_patch_features is None and hasattr(self, "_custom_patch_features"):
+        # Only use attribute during generation decoding steps (when no pixel_values)
+        # The attribute is set/cleared externally by generate_with_vision_features
+        if pixel_values is None:
+            custom_patch_features = getattr(self, "_custom_patch_features")
 
     def _stack_features(features):
         if isinstance(features, (list, tuple)):
@@ -142,45 +143,6 @@ def forward(
                 )
             delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=1)
             position_ids += delta.to(position_ids.device)
-
-    # Optional: override vision token position ids with custom patch assignments
-    # Expect kwargs["custom_vision_patch_positions"] as (num_vision_tokens, 3 [t,h,w]) per batch item
-    # and kwargs["custom_vision_token_indices"] as List[List[int]] token indices for vision placeholders
-    custom_patch_pos = kwargs.pop("custom_vision_patch_positions", None)
-    custom_tok_idx = kwargs.pop("custom_vision_token_indices", None)
-    if custom_patch_pos is not None and custom_tok_idx is not None and position_ids is not None:
-        # Ensure tensor on correct device/dtype
-        if not torch.is_tensor(custom_patch_pos):
-            custom_patch_pos = torch.as_tensor(custom_patch_pos, device=inputs_embeds.device)
-        custom_patch_pos = custom_patch_pos.to(device=inputs_embeds.device, dtype=position_ids.dtype)
-
-        # Handle batch = 1 common case; support lists per batch
-        if isinstance(custom_tok_idx, (list, tuple)) and len(custom_tok_idx) > 0 and isinstance(custom_tok_idx[0], (list, tuple)):
-            token_indices_per_batch = custom_tok_idx
-        else:
-            token_indices_per_batch = [custom_tok_idx]
-
-        batch_size = position_ids.shape[1]
-        # If a single positions tensor is provided, reuse for all batch items
-        per_batch_positions = [custom_patch_pos for _ in range(batch_size)]
-
-        for b in range(min(batch_size, len(token_indices_per_batch))):
-            tok_idx = token_indices_per_batch[b]
-            if tok_idx is None or len(tok_idx) == 0:
-                continue
-            # Expect shape (N, 3), slice if longer than tok count
-            pos_b = per_batch_positions[b]
-            if pos_b.dim() == 2 and pos_b.shape[-1] == 3:
-                # Align length
-                n = min(len(tok_idx), pos_b.shape[0])
-                assign = pos_b[:n].T  # (3, n)
-                # Overwrite t/h/w indices for the selected token positions
-                position_ids[:, b, tok_idx[:n]] = assign
-
-    # NOTE: We no longer zero out positional encodings for custom vision tokens.
-    # Zeroing all vision token positions made multiple images indistinguishable
-    # (all appeared at position 0). Instead, we keep the computed sequential
-    # positions so the model can differentiate between separate descriptor images.
 
     outputs = self.language_model(
         input_ids=None,
@@ -501,11 +463,20 @@ def generate_with_vision_features(
 ):
     # preprocess and generate
     inputs = model_inputs(messages, vision_features, processor).to(model.device)
-    generated_ids = model.generate(
-        **inputs,
-        max_new_tokens=max_tokens,
-        custom_patch_features=vision_features,
-    )
+    
+    # Set custom features on model for decoding steps (generate() only passes kwargs on first call)
+    # We set this explicitly here and clean up after, avoiding hidden state in forward()
+    model.model._custom_patch_features = vision_features
+    try:
+        generated_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            custom_patch_features=vision_features,
+        )
+    finally:
+        # Always clean up to prevent state leakage
+        if hasattr(model.model, "_custom_patch_features"):
+            delattr(model.model, "_custom_patch_features")
 
     # remove prefix tokens (model input) and decode
     generated_ids_trimmed = [
@@ -1017,30 +988,22 @@ def crop_patch_features(patch_feat: torch.Tensor, cw, ch, cx1, cx2, cy1, cy2):
         end_dim=1
     )
 
-
-def get_patch_segmasks(im_height, im_width):
-    """generate an instance segmentation mask
-    where each instance corresponds to one qwen 2.5 vl vision encoder patch"""
-    # raw_patches_height, raw_patches_width = (
-    #     im_height // PATCH_SIZE,
-    #     im_width // PATCH_SIZE,
-    # )
-    # patches_width = torch.ceil(torch.div(raw_patches_width, SPATIAL_MERGE))
-    # rowcol = torch.stack(
-    #     torch.meshgrid(
-    #         torch.arange(raw_patches_height * PATCH_SIZE),
-    #         torch.arange(raw_patches_width * PATCH_SIZE),
-    #         indexing="ij",
-    #     )
-    # )
-    # patch_coords = torch.floor_divide(rowcol, EFFECTIVE_PATCH_SIZE)
-    # return patch_coords[0] * patches_width + patch_coords[1]
+def get_patch_hw(im_height, im_width):
+    """
+    Get qwen2.5 vl patchgrid dims for given image dims.
+    """
     patches_height = im_height // EFFECTIVE_PATCH_SIZE + (
         (im_height // PATCH_SIZE) % 4 == 3
     )  # cursed behavior
     patches_width = im_width // EFFECTIVE_PATCH_SIZE + (
         (im_width // PATCH_SIZE) % 4 == 3
     )  # -,,-
+    return patches_height, patches_width
+
+def get_patch_segmasks(im_height, im_width):
+    """generate an instance segmentation mask
+    where each instance corresponds to one qwen 2.5 vl vision encoder patch"""
+    patches_height, patches_width = get_patch_hw(im_height, im_width)
     rowcol = torch.stack(
         torch.meshgrid(
             torch.arange(

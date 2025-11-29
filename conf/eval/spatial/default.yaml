@@ -10,8 +10,6 @@ top_k_scores: 50 # for attn based methods wo/ refinement
 
 # splat: attention scores over all gaussians
 # NOTE: these are also used for attn extraction in splat_graph
-use_frame_patch_grid_for_splat: false
-splat_zero_positional_encodings: true
 splat_system_prompt: |
   You are an expert surgical assistant. Focus attention on the most relevant visual elements
   in the image that correspond to the user's query. No explanations are needed.
@@ -113,8 +111,6 @@ frame_direct_prompt_template: |
 # splat graph: 3d point proposals by splat attention, final 3d point by qwen, project to 2d
 splat_graph_attn_layer: 16
 splat_graph_max_proposals: 50
-use_frame_patch_grid_for_splat_graph: false
-splat_graph_zero_positional_encodings: true
 splat_graph_include_scores_in_context: false
 splat_graph_system_prompt: |
   You are an expert visceral surgeon analyzing a cholecystectomy scene using a scene graph and 3D point proposals.

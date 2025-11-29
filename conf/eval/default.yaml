@@ -1,12 +1,12 @@
 defaults:
   # - triplets: default
-  - temporal: default
+  # - temporal: default
   - spatial: default
   - _self_
 
 # nulling skips - comment out to enable
 triplets: null
-# temporal: null
+temporal: null
 # spatial: null
 
 # Quantization settings for the evaluation model (used across all eval stages)
@@ -26,7 +26,7 @@ paths:
   images_subdir: "images"
   
   # Subdirectory within output clip dir that contains graph data
-  graph_subdir: "graph_hailmary_final"
+  graph_subdir: ${graph_extraction.graph_output_subdir}
   
   # Can override these per evaluation type if needed
   # e.g., different graph subdirs for different ablations

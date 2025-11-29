@@ -12,7 +12,7 @@ import qwen_vl
 from scene.dataset_readers import CameraInfo, readColmapSceneInfo
 from scene.cameras import Camera
 from PIL import Image
-from autoencoder.model_qwen import QwenAutoencoder
+from qwen_vl_utils import process_vision_info
 
 
 def get_patched_qwen_for_spatial_grounding(
@@ -40,10 +40,6 @@ def extract_text_to_vision_attention(
     prompt: str,
     substring: str,
     system_prompt: str,
-    *,
-    vision_patch_positions: Optional[torch.Tensor] = None,
-    vision_patch_grid_thw: Optional[torch.Tensor] = None,
-    zero_vision_positional_encodings: bool = False,
 ):
     """Extract attention scores from substring query tokens to vision tokens across layers.
 
@@ -81,11 +77,6 @@ def extract_text_to_vision_attention(
         model.device
     )
 
-    if vision_patch_grid_thw is not None:
-        inputs["image_grid_thw"] = vision_patch_grid_thw.to(
-            model.device, dtype=inputs["image_grid_thw"].dtype
-        )
-
     # Identify vision token positions via <|image_pad|> before forward (needed for custom pos ids)
     input_ids = inputs.input_ids[0]
     image_pad_token = processor.tokenizer.encode(
@@ -103,17 +94,6 @@ def extract_text_to_vision_attention(
             return_dict=True,
             custom_patch_features=[vision_features],
         )
-        # Optional positional encoding control
-        if zero_vision_positional_encodings:
-            # Override all vision token positional ids with zeros (t=h=w=0)
-            zeros_pos = torch.zeros(
-                (len(vision_token_indices), 3), dtype=torch.long, device=model.device
-            )
-            model_kwargs["custom_vision_patch_positions"] = zeros_pos
-            model_kwargs["custom_vision_token_indices"] = [vision_token_indices]
-        elif vision_patch_positions is not None:
-            model_kwargs["custom_vision_patch_positions"] = vision_patch_positions
-            model_kwargs["custom_vision_token_indices"] = [vision_token_indices]
 
         # Debug: print applied positional ids for a small window around the middle
         if bool(int(os.getenv("DEBUG_VISION_POS_ENC", "0"))):
@@ -202,18 +182,25 @@ def extract_text_to_image_attention(
         {
             "role": "user",
             "content": [
+                # Pass actual image so apply_chat_template computes correct token count
                 {"type": "image", "image": image},
                 {"type": "text", "text": prompt},
             ],
         },
     ]
 
-    # Build text and inputs using real image
+    # Build text with correct image token count
     text = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
+    # Extract images using process_vision_info to ensure correct format
+    image_inputs, video_inputs = process_vision_info(messages)
     inputs = processor(
-        text=[text], images=[[image]], padding=True, return_tensors="pt"
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
     ).to(model.device)
 
     with torch.no_grad():
@@ -394,8 +381,6 @@ def splat_predict_query_list(
     train_cameras,
     prompt_template: str,
     system_prompt: str,
-    use_frame_patch_grid: bool = False,
-    zero_vision_positional_encodings: bool = False,
 ):
     outputs = []
     frame_idx = int(frame_number)
@@ -403,29 +388,6 @@ def splat_predict_query_list(
     proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
         frame_idx, train_cameras, frame_name
     )
-
-    patch_positions_tensor: Optional[torch.Tensor] = None
-    grid_thw_tensor: Optional[torch.Tensor] = None
-    if use_frame_patch_grid and ts_feats.shape[0] > 0:
-        pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)
-        pix_x = np.clip(np.round(pixels[:, 0]).astype(np.int64), 0, img_width - 1)
-        pix_y = np.clip(np.round(pixels[:, 1]).astype(np.int64), 0, img_height - 1)
-
-        ph, pw = _qwen25_patch_grid(img_height, img_width)
-        EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
-        cols = np.clip((pix_x // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
-        rows = np.clip((pix_y // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
-        patch_thw = np.stack([np.zeros_like(rows), rows, cols], axis=-1)
-
-        order = np.lexsort((np.arange(patch_thw.shape[0]), patch_thw[:, 2], patch_thw[:, 1]))
-        patch_thw = patch_thw[order]
-        ts_feats = ts_feats[order]
-        pos_t = pos_t[order]
-
-        patch_positions_tensor = torch.as_tensor(patch_thw, device=model.device)
-        grid_thw_tensor = torch.tensor(
-            [[1, ph, pw]], dtype=torch.long, device=model.device
-        )
 
     feats_tensor = torch.tensor(ts_feats, device=model.device)
     for query in queries_list:
@@ -449,9 +411,6 @@ def splat_predict_query_list(
             prompt=prompt,
             substring=substring,
             system_prompt=system_prompt,
-            vision_patch_positions=patch_positions_tensor,
-            vision_patch_grid_thw=grid_thw_tensor,
-            zero_vision_positional_encodings=zero_vision_positional_encodings,
         )
         attn_scores = attn_out["scores"]
 
@@ -497,8 +456,6 @@ def splat_feat_queries(
 
     results = {}
     splat_system_prompt = cfg.eval.spatial.splat_system_prompt
-    use_frame_grid = bool(getattr(cfg.eval.spatial, "use_frame_patch_grid_for_splat", False))
-    zero_posenc = bool(getattr(cfg.eval.spatial, "splat_zero_positional_encodings", False))
 
     for timestep, timestep_queries in clip_gt.items():
         t = int(timestep)
@@ -525,8 +482,6 @@ def splat_feat_queries(
             train_cameras=train_cameras,
             prompt_template=prompt_template,
             system_prompt=splat_system_prompt,
-            use_frame_patch_grid=use_frame_grid,
-            zero_vision_positional_encodings=zero_posenc,
         )
 
         results[timestep]["actions"] = splat_predict_query_list(
@@ -542,8 +497,6 @@ def splat_feat_queries(
             train_cameras=train_cameras,
             prompt_template=prompt_template,
             system_prompt=splat_system_prompt,
-            use_frame_patch_grid=use_frame_grid,
-            zero_vision_positional_encodings=zero_posenc,
         )
 
     return results
@@ -577,13 +530,6 @@ def _parse_point_from_json(text: str) -> Optional[List[float]]:
     except Exception:
         pass
 
-    # Fallback: extract first three floats
-    nums = _re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", text)
-    if len(nums) >= 3:
-        try:
-            return [float(nums[0]), float(nums[1]), float(nums[2])]
-        except Exception:
-            return None
     return None
 
 
@@ -609,12 +555,6 @@ def _parse_pixel_from_json(text: str) -> Optional[List[float]]:
     except Exception:
         pass
 
-    nums = _re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", text)
-    if len(nums) >= 2:
-        try:
-            return [float(nums[0]), float(nums[1])]
-        except Exception:
-            return None
     return None
 
 
@@ -808,8 +748,6 @@ def splat_graph_predict_query_list(
     prompt_template_graph: str,
     max_proposals: int | None = None,
     include_scores_in_context: bool = False,
-    use_frame_patch_grid: bool = False,
-    zero_vision_positional_encodings: bool = False,
 ):
     """Use SPLAT attention to propose 3D points, then refine via static-graph prompting.
 
@@ -822,29 +760,6 @@ def splat_graph_predict_query_list(
     proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
         int(frame_number), train_cameras, frame_name
     )
-
-    patch_positions_tensor: Optional[torch.Tensor] = None
-    grid_thw_tensor: Optional[torch.Tensor] = None
-    if use_frame_patch_grid and ts_feats.shape[0] > 0:
-        pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)
-        pix_x = np.clip(np.round(pixels[:, 0]).astype(np.int64), 0, img_width - 1)
-        pix_y = np.clip(np.round(pixels[:, 1]).astype(np.int64), 0, img_height - 1)
-
-        ph, pw = _qwen25_patch_grid(img_height, img_width)
-        EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
-        cols = np.clip((pix_x // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
-        rows = np.clip((pix_y // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
-        patch_thw = np.stack([np.zeros_like(rows), rows, cols], axis=-1)
-
-        order = np.lexsort((np.arange(patch_thw.shape[0]), patch_thw[:, 2], patch_thw[:, 1]))
-        patch_thw = patch_thw[order]
-        ts_feats = ts_feats[order]
-        pos_t = pos_t[order]
-
-        patch_positions_tensor = torch.as_tensor(patch_thw, device=model_spatial.device)
-        grid_thw_tensor = torch.tensor(
-            [[1, ph, pw]], dtype=torch.long, device=model_spatial.device
-        )
 
     feats_tensor = torch.tensor(ts_feats, device=model_spatial.device)
 
@@ -862,9 +777,6 @@ def splat_graph_predict_query_list(
                 prompt=prompt_attn,
                 substring=substring,
                 system_prompt=system_prompt_splat_attn,
-                vision_patch_positions=patch_positions_tensor,
-                vision_patch_grid_thw=grid_thw_tensor,
-                zero_vision_positional_encodings=zero_vision_positional_encodings,
             )
             attn_scores = attn_out["scores"]  # [1, Q, V]
 
@@ -992,8 +904,6 @@ def splat_graph_feat_queries(
     include_scores = cfg.eval.spatial.splat_graph_include_scores_in_context
 
     results: Dict[str, Any] = {}
-    use_frame_grid = bool(getattr(cfg.eval.spatial, "use_frame_patch_grid_for_splat_graph", False))
-    zero_posenc = bool(getattr(cfg.eval.spatial, "splat_graph_zero_positional_encodings", False))
     for timestep, timestep_queries in clip_gt.items():
         t = int(timestep)
         ts_feats = splat_feats[t]
@@ -1025,8 +935,6 @@ def splat_graph_feat_queries(
             prompt_template_graph=prompt_template_graph,
             max_proposals=max_props,
             include_scores_in_context=include_scores,
-            use_frame_patch_grid=use_frame_grid,
-            zero_vision_positional_encodings=zero_posenc,
         )
 
         results[timestep]["actions"] = splat_graph_predict_query_list(
@@ -1052,27 +960,9 @@ def splat_graph_feat_queries(
             prompt_template_graph=prompt_template_graph,
             max_proposals=max_props,
             include_scores_in_context=include_scores,
-            use_frame_patch_grid=use_frame_grid,
-            zero_vision_positional_encodings=zero_posenc,
         )
 
     return results
-
-
-def _qwen25_patch_grid(im_height: int, im_width: int) -> tuple[int, int]:
-    """Compute Qwen2.5-VL patch grid (H, W) for a given image size.
-
-    Mirrors qwen_vl.get_patch_segmasks grid math.
-    """
-    PATCH_SIZE = qwen_vl.PATCH_SIZE
-    EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
-    patches_height = im_height // EFFECTIVE_PATCH_SIZE + (
-        (im_height // PATCH_SIZE) % 4 == 3
-    )
-    patches_width = im_width // EFFECTIVE_PATCH_SIZE + (
-        (im_width // PATCH_SIZE) % 4 == 3
-    )
-    return int(patches_height), int(patches_width)
 
 
 def _patch_indices_to_pixel_centers(
@@ -1083,7 +973,7 @@ def _patch_indices_to_pixel_centers(
     Returns array of shape (N, 2) with (x, y) in pixel coordinates.
     """
     EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
-    ph, pw = _qwen25_patch_grid(img_h, img_w)
+    ph, pw = qwen_vl.get_patch_hw(img_h, img_w)
     cols = patch_indices % pw
     rows = patch_indices // pw
     xs = (cols + 0.5) * EFFECTIVE_PATCH_SIZE
@@ -1091,36 +981,6 @@ def _patch_indices_to_pixel_centers(
     xs = np.clip(xs, 0, img_w - 1)
     ys = np.clip(ys, 0, img_h - 1)
     return np.stack([xs, ys], axis=-1)
-
-
-def _compute_gaussian_patch_assignment_thw(
-    *,
-    pos_t: np.ndarray,
-    train_cameras,
-    frame_number: int,
-) -> np.ndarray:
-    """Return per-gaussian [t,h,w] indices on the frame's Qwen patch grid (no filtering).
-
-    t is fixed to 0. h,w are computed by projecting to pixels, clamping to the frame,
-    then mapping to Qwen's EFFECTIVE_PATCH_SIZE grid and bounding within [0..H-1],[0..W-1].
-    """
-    local_idx = int(frame_number)
-    frame_name = f"frame_{local_idx:06d}.jpg"
-    proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
-        local_idx, train_cameras, frame_name
-    )
-
-    pixels = project_3d_to_2d(pos_t, proj_matrix, img_width, img_height)
-    pix_x = np.clip(np.round(pixels[:, 0]).astype(np.int64), 0, img_width - 1)
-    pix_y = np.clip(np.round(pixels[:, 1]).astype(np.int64), 0, img_height - 1)
-
-    EFFECTIVE_PATCH_SIZE = qwen_vl.EFFECTIVE_PATCH_SIZE
-    ph, pw = _qwen25_patch_grid(img_height, img_width)
-
-    cols = np.clip((pix_x // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, pw - 1)
-    rows = np.clip((pix_y // EFFECTIVE_PATCH_SIZE).astype(np.int64), 0, ph - 1)
-    t = np.zeros_like(rows)
-    return np.stack([t, rows, cols], axis=-1)
 
 
 def frame_attn_predict_query_list(
