@@ -3,7 +3,6 @@ from hydra.core.global_hydra import GlobalHydra
 from pathlib import Path
 from omegaconf import OmegaConf
 import torch
-import os
 import gc
 import random
 import numpy as np
@@ -20,36 +19,10 @@ from compute_metrics import (
     compute_temporal_metrics,
     compute_triplets_metrics,
 )
+from llm.qwen_vl import get_patched_qwen
 
 
 import sys
-from typing import Callable
-
-
-def _get_qwen_loader(cfg) -> Callable[[], tuple]:
-    if cfg.feature_extraction.get("use_qwen3", False):
-        from qwen_vl_qwen3 import get_patched_qwen3
-
-        def loader():
-            return get_patched_qwen3(
-                model_path=cfg.feature_extraction.get(
-                    "model_id", "Qwen/Qwen3-VL-8B-Instruct"
-                ),
-                use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
-                use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
-            )
-
-        return loader
-    else:
-        from qwen_vl import get_patched_qwen
-
-        def loader():
-            return get_patched_qwen(
-                use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
-                use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
-            )
-
-        return loader
 
 
 def main():
@@ -81,8 +54,10 @@ def main():
                 process_clip(clip, cfg)
 
             if not cfg.skip_feature_extraction:
-                get_patched = _get_qwen_loader(cfg)
-                model, processor = get_patched()
+                model, processor = get_patched_qwen(
+                    use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
+                    use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
+                )
                 extract_qwen_features(clip, cfg, model, processor)
                 del model
                 del processor
@@ -120,8 +95,10 @@ def main():
                 process_clip(clip, cfg)
 
         if not cfg.skip_feature_extraction:
-            get_patched = _get_qwen_loader(cfg)
-            model, processor = get_patched()
+            model, processor = get_patched_qwen(
+                use_bnb_4bit=cfg.feature_extraction.bnb_4bit,
+                use_bnb_8bit=cfg.feature_extraction.bnb_8bit,
+            )
             for clip in cfg.clips:
                 extract_qwen_features(clip, cfg, model, processor)
             del model

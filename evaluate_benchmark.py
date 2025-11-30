@@ -2,14 +2,13 @@ import gc
 import json
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
-import os
 import random
 from tqdm import tqdm
 import hydra
 import numpy as np
 import torch
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
-from qwen_vl import get_patched_qwen
+from llm.qwen_vl import get_patched_qwen
 
 from benchmark.benchmark_config import BenchmarkConfig
 from benchmark.frame_selectors import TripletsFrameSelector
@@ -33,8 +32,6 @@ from rerun_utils import (
 
 def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfig:
     # Infer qwen version and quantization from feature_extraction group if present
-    use_qwen3 = bool(cfg.get("feature_extraction", {}).get("use_qwen3", False))
-    qwen_version = "qwen3" if use_qwen3 else "qwen2.5"
     use_4bit = bool(cfg.get("feature_extraction", {}).get("bnb_4bit", False))
 
     # Paths
@@ -74,8 +71,6 @@ def _build_benchmark_config(cfg: DictConfig, clip: DictConfig) -> BenchmarkConfi
         graph_dir=graph_dir,
         images_subdir=cfg.eval.paths.images_subdir,
         graph_subdir=cfg.eval.paths.graph_subdir,
-        model_name="qwen",
-        qwen_version=qwen_version,
         use_4bit_quantization=use_4bit,
     )
     return bench_cfg

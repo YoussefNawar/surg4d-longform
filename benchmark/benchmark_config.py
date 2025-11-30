@@ -33,9 +33,6 @@ class BenchmarkConfig:
     images_subdir: str = "images"  # Subdirectory within video_dir containing images
     graph_subdir: str = "graph"    # Subdirectory within output clip dir containing graph data
     
-    # Model settings
-    model_name: Literal["qwen", "gpt4"] = "qwen"
-    qwen_version: Literal["qwen2.5", "qwen3"] = "qwen2.5"  # Differentiate between Qwen versions
     use_4bit_quantization: bool = False
     # Should always be run on cuda
     device: str = "cuda"

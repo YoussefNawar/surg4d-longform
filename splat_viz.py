@@ -15,8 +15,8 @@ N_TIMESTEPS = 80
 out_path = Path('splat_viz')
 
 # ------------- input arguments ----------------------
-data_path = Path('data/preprocessed/final_scenes_qwen3_False/video17_01803')
-output_path = Path('output/final_scenes_qwen3_False/video17_01803')
+data_path = Path('TODDO SET')
+output_path = Path('TODDO SET')
 frame = 78
 pc_exp_name = "pointcloud.ply"
 img_exp_name = "render_img.png"
