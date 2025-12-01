@@ -291,6 +291,7 @@ def ask_qwen_about_image(
     model: Qwen2_5_VLForConditionalGeneration,
     processor: Qwen2_5_VLProcessor,
     system_prompt: str = "You are a medical assistant designed to aid medical practitioners during a cholecystectomy procedure. The surgeon user will ask you a question and show you their current situation, and you give a concise answer.",
+    max_tokens: int = 128,
 ):
     messages = [
         {
@@ -321,7 +322,8 @@ def ask_qwen_about_image(
     ).to(model.device)
     generated_ids = model.generate(
         **inputs,
-        max_new_tokens=128,
+        max_new_tokens=max_tokens,
+        do_sample=False,
     )
     generated_ids_trimmed = [
         out_ids[len(in_ids) :]
@@ -453,6 +455,7 @@ def generate_with_vision_features(
             generated_ids = model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
+                do_sample=False,
                 custom_patch_features=main_features,
                 custom_deepstack_features=deepstack_features,
             )
@@ -473,6 +476,7 @@ def generate_with_vision_features(
             generated_ids = model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
+                do_sample=False,
                 custom_patch_features=vision_features,
             )
         finally:
@@ -589,6 +593,7 @@ def generate_with_vision_features_agentic(
                 generated_ids = model.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
+                    do_sample=False,
                     custom_patch_features=main_features,
                     custom_deepstack_features=deepstack_features,
                 )
@@ -603,6 +608,7 @@ def generate_with_vision_features_agentic(
                 generated_ids = model.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
+                    do_sample=False,
                     custom_patch_features=vision_features,
                 )
             finally:
