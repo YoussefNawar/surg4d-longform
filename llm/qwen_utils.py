@@ -446,43 +446,23 @@ def generate_with_vision_features(
         # preprocess and generate
         inputs = model_inputs(messages, main_features, processor, qwen_version=qwen_version).to(model.device)
 
-        # Set custom features on model for decoding steps
-        # TODO we pass the custom feats via class attribute AND kwargs here
-        # TODO very ugly, maybe 
-        model.model._custom_patch_features = main_features
-        model.model._custom_deepstack_features = deepstack_features
-        try:
-            generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                do_sample=False,
-                custom_patch_features=main_features,
-                custom_deepstack_features=deepstack_features,
-            )
-        finally:
-            # Always clean up to prevent state leakage
-            if hasattr(model.model, "_custom_patch_features"):
-                delattr(model.model, "_custom_patch_features")
-            if hasattr(model.model, "_custom_deepstack_features"):
-                delattr(model.model, "_custom_deepstack_features")
+        generated_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            do_sample=False,
+            custom_patch_features=main_features,
+            custom_deepstack_features=deepstack_features,
+        )
     else:
         # Qwen2.5 path
         inputs = model_inputs(messages, vision_features, processor, qwen_version=qwen_version).to(model.device)
 
-        # Set custom features on model for decoding steps (generate() only passes kwargs on first call)
-        # We set this explicitly here and clean up after, avoiding hidden state in forward()
-        model.model._custom_patch_features = vision_features
-        try:
-            generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                do_sample=False,
-                custom_patch_features=vision_features,
-            )
-        finally:
-            # Always clean up to prevent state leakage
-            if hasattr(model.model, "_custom_patch_features"):
-                delattr(model.model, "_custom_patch_features")
+        generated_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            do_sample=False,
+            custom_patch_features=vision_features,
+        )
 
     # remove prefix tokens (model input) and decode
     generated_ids_trimmed = [
@@ -587,33 +567,20 @@ def generate_with_vision_features_agentic(
         ).to(model.device)
 
         if qwen_version == "qwen3":
-            model.model._custom_patch_features = main_features
-            model.model._custom_deepstack_features = deepstack_features
-            try:
-                generated_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=max_tokens,
-                    do_sample=False,
-                    custom_patch_features=main_features,
-                    custom_deepstack_features=deepstack_features,
-                )
-            finally:
-                if hasattr(model.model, "_custom_patch_features"):
-                    delattr(model.model, "_custom_patch_features")
-                if hasattr(model.model, "_custom_deepstack_features"):
-                    delattr(model.model, "_custom_deepstack_features")
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                do_sample=False,
+                custom_patch_features=main_features,
+                custom_deepstack_features=deepstack_features,
+            )
         else:
-            model.model._custom_patch_features = vision_features
-            try:
-                generated_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=max_tokens,
-                    do_sample=False,
-                    custom_patch_features=vision_features,
-                )
-            finally:
-                if hasattr(model.model, "_custom_patch_features"):
-                    delattr(model.model, "_custom_patch_features")
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                do_sample=False,
+                custom_patch_features=vision_features,
+            )
 
         generated_ids_trimmed = [
             out_ids[len(in_ids) :]

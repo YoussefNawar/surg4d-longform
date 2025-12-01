@@ -71,13 +71,8 @@ class PatchedQwen2_5_VLModel(Qwen2_5_VLModel):
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
-        # Get custom features from kwargs or from attribute (set externally for generation)
-        custom_patch_features = kwargs.pop("custom_patch_features", None)
-        if custom_patch_features is None and hasattr(self, "_custom_patch_features"):
-            # Only use attribute during generation decoding steps (when no pixel_values)
-            # The attribute is set/cleared externally by generate_with_vision_features
-            if pixel_values is None:
-                custom_patch_features = getattr(self, "_custom_patch_features")
+        # Get custom features from kwargs (use get() to preserve for subsequent generation steps)
+        custom_patch_features = kwargs.get("custom_patch_features", None)
 
         def _stack_features(features):
             if isinstance(features, (list, tuple)):
@@ -267,16 +262,9 @@ class PatchedQwen3VLModel(Qwen3VLModel):
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
-        # Get custom features from kwargs or from attribute (set externally for generation)
-        custom_patch_features = kwargs.pop("custom_patch_features", None)
-        custom_deepstack_features = kwargs.pop("custom_deepstack_features", None)
-
-        if custom_patch_features is None and hasattr(self, "_custom_patch_features"):
-            if pixel_values is None:
-                custom_patch_features = getattr(self, "_custom_patch_features")
-        if custom_deepstack_features is None and hasattr(self, "_custom_deepstack_features"):
-            if pixel_values is None:
-                custom_deepstack_features = getattr(self, "_custom_deepstack_features")
+        # Get custom features from kwargs (use get() to preserve for subsequent generation steps)
+        custom_patch_features = kwargs.get("custom_patch_features", None)
+        custom_deepstack_features = kwargs.get("custom_deepstack_features", None)
 
         def _stack_features(features):
             if isinstance(features, (list, tuple)):
