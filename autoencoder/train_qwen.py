@@ -86,12 +86,14 @@ def train(
         # Eval
         model.eval()
         val_loss_sum = 0.0
+        n_samples = 0
         with torch.no_grad():
             for batch in val_loader:
                 x = batch.to(device, dtype=torch.float32)
                 x_rec = model(x)
                 val_loss_sum += F.mse_loss(x_rec, x, reduction='sum').item()
-        val_loss = val_loss_sum / len(val_dataset)
+                n_samples += x.numel()
+        val_loss = val_loss_sum / n_samples
         tb.add_scalar('val/loss', val_loss, epoch)
         if val_loss < best_val:
             best_val = val_loss
