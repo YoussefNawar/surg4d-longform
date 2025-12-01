@@ -76,6 +76,39 @@ def qwen3_cat_to_deepstack(
     return main_feats, deepstack_feats
 
 
+def qwen3_format_multiple_deepstack_features(
+    vision_features: List[torch.Tensor],
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """Prepare Qwen3 vision features for multiple images.
+
+    Takes a list of concatenated feature tensors (one per image) and splits them
+    into the format expected by the Qwen3 model forward pass.
+
+    Args:
+        vision_features: List of tensors, each (N_i, hidden_dim * 4) containing
+                        [main | ds0 | ds1 | ds2] for each image
+
+    Returns:
+        Tuple of (main_features, deepstack_features) where:
+            main_features: List of tensors (one per image), each (N_i, hidden_dim)
+            deepstack_features: List of 3 tensors (one per layer), each containing
+                               ALL visual tokens from ALL images concatenated
+    """
+    main_features = []
+    all_deepstack = [[] for _ in range(QWEN_CONSTANTS["qwen3"]["num_deepstack_layers"])]
+
+    for feat in vision_features:
+        main, deepstack_list = qwen3_cat_to_deepstack(feat)
+        main_features.append(main)
+        for i, ds in enumerate(deepstack_list):
+            all_deepstack[i].append(ds)
+
+    # Concatenate deepstack features across all images per layer
+    deepstack_features = [torch.cat(ds_list, dim=0) for ds_list in all_deepstack]
+
+    return main_features, deepstack_features
+
+
 def get_patched_qwen25(
     use_bnb_4bit: bool = False,
     use_bnb_8bit: bool = False,
@@ -406,36 +439,14 @@ def generate_with_vision_features(
     """
     # For Qwen3, we need to split concatenated features into main + deepstack
     if qwen_version == "qwen3":
-        # Stored features are concatenated along feature dim: (N, 4096*4) = [main | ds0 | ds1 | ds2]
-        # We split them back via qwen3_cat_to_deepstack to get:
-        #   - main: (N, 4096)
-        #   - deepstack_list: [ds0, ds1, ds2] each (N, 4096)
-        #
-        # The forward expects:
-        #   - custom_patch_features: list of main tensors (one per image), concatenated internally
-        #   - custom_deepstack_features: list of 3 tensors, each containing ALL visual tokens
-        #     from ALL images concatenated (this is what get_image_features returns when
-        #     processing multiple images at once)
-        #
-        # So for multiple images we must concatenate deepstack per layer ourselves.
-        # For single image, torch.cat([single_tensor], dim=0) is a no-op.
-
-        main_features = []
-        all_deepstack = [[] for _ in range(QWEN_CONSTANTS["qwen3"]["num_deepstack_layers"])]
-
-        for feat in vision_features:
-            main, deepstack_list = qwen3_cat_to_deepstack(feat)
-            main_features.append(main)
-            for i, ds in enumerate(deepstack_list):
-                all_deepstack[i].append(ds)
-
-        # Concatenate deepstack features across all images per layer
-        deepstack_features = [torch.cat(ds_list, dim=0) for ds_list in all_deepstack]
+        main_features, deepstack_features = qwen3_format_multiple_deepstack_features(vision_features)
 
         # preprocess and generate
         inputs = model_inputs(messages, main_features, processor, qwen_version=qwen_version).to(model.device)
 
         # Set custom features on model for decoding steps
+        # TODO we pass the custom feats via class attribute AND kwargs here
+        # TODO very ugly, maybe 
         model.model._custom_patch_features = main_features
         model.model._custom_deepstack_features = deepstack_features
         try:
@@ -513,9 +524,10 @@ def _extract_final_answer(response: str) -> str:
 def generate_with_vision_features_agentic(
     messages: List[Dict[str, Any]],
     vision_features: List[torch.Tensor],
-    model: Qwen2_5_VLForConditionalGeneration,
-    processor: Qwen2_5_VLProcessor,
+    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
+    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
     tools: Dict[str, Tuple[Callable, Dict[str, Any]]],
+    qwen_version: str = "qwen25",
     max_tokens: int = 5012,
     max_iterations: int = 10,
     verbose: bool = False,
@@ -524,12 +536,15 @@ def generate_with_vision_features_agentic(
 
     Args:
         messages: Chat messages (same format as generate_with_vision_features)
-        vision_features: List of vision feature tensors
+        vision_features: List of vision feature tensors.
+            For qwen25: each tensor is (N, hidden_dim)
+            For qwen3: each tensor is (N, hidden_dim * 4) containing [main | d0 | d1 | d2]
         model: The Qwen model
         processor: The Qwen processor
         tools: Dict mapping tool_name -> (callable, json_spec)
                json_spec should be in OpenAI function calling format:
                {"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}
+        qwen_version: Either "qwen25" or "qwen3"
         max_tokens: Maximum tokens per generation
         max_iterations: Maximum number of tool-calling iterations
         verbose: If True, print intermediate steps
@@ -549,25 +564,50 @@ def generate_with_vision_features_agentic(
 
     tool_call_history = []
 
+    # Prepare features based on qwen version
+    if qwen_version == "qwen3":
+        main_features, deepstack_features = qwen3_format_multiple_deepstack_features(vision_features)
+        features_for_inputs = main_features
+    else:
+        features_for_inputs = vision_features
+        main_features = None
+        deepstack_features = None
+
     for iteration in range(max_iterations):
         if verbose:
             print(f"\n--- Iteration {iteration + 1} ---")
 
         # Generate response with tools
         inputs = model_inputs(
-            current_messages, vision_features, processor, tools=tool_specs
+            current_messages, features_for_inputs, processor, qwen_version=qwen_version, tools=tool_specs
         ).to(model.device)
 
-        model.model._custom_patch_features = vision_features
-        try:
-            generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                custom_patch_features=vision_features,
-            )
-        finally:
-            if hasattr(model.model, "_custom_patch_features"):
-                delattr(model.model, "_custom_patch_features")
+        if qwen_version == "qwen3":
+            model.model._custom_patch_features = main_features
+            model.model._custom_deepstack_features = deepstack_features
+            try:
+                generated_ids = model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    custom_patch_features=main_features,
+                    custom_deepstack_features=deepstack_features,
+                )
+            finally:
+                if hasattr(model.model, "_custom_patch_features"):
+                    delattr(model.model, "_custom_patch_features")
+                if hasattr(model.model, "_custom_deepstack_features"):
+                    delattr(model.model, "_custom_deepstack_features")
+        else:
+            model.model._custom_patch_features = vision_features
+            try:
+                generated_ids = model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    custom_patch_features=vision_features,
+                )
+            finally:
+                if hasattr(model.model, "_custom_patch_features"):
+                    delattr(model.model, "_custom_patch_features")
 
         generated_ids_trimmed = [
             out_ids[len(in_ids) :]
@@ -660,8 +700,9 @@ def prompt_with_graph_at_timestep(
     node_centers: np.ndarray,
     node_centroids: np.ndarray,
     node_extents: np.ndarray,
-    model: Qwen2_5_VLForConditionalGeneration,
-    processor: Qwen2_5_VLProcessor,
+    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
+    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
+    qwen_version: str = "qwen25",
     system_prompt: str = None,
     tools: Dict[str, Tuple[Callable, Dict[str, Any]]] = {},
 ):
@@ -769,6 +810,7 @@ def prompt_with_graph_at_timestep(
             model=model,
             processor=processor,
             tools=tools,
+            qwen_version=qwen_version,
             max_tokens=5012,
         )
     else:
@@ -777,6 +819,7 @@ def prompt_with_graph_at_timestep(
             vision_features=[torch.Tensor(f) for f in node_feats],
             model=model,
             processor=processor,
+            qwen_version=qwen_version,
             max_tokens=5012,
         )
 
