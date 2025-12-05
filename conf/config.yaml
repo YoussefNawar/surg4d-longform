@@ -3,8 +3,8 @@ defaults:
   - preprocessing: qwen3
   - feature_extraction: qwen3
   - autoencoder: qwen3_moreepochs
-  - splat: default
-  - graph_extraction: vanilla_strongfilter
+  - splat: less_tricks
+  - graph_extraction: vanilla_qwen3
   - eval: default
   - compute_metrics: default
   - _self_
@@ -23,7 +23,7 @@ cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k
 cholect50_root: data/cholect50
 preprocessed_root: data/preprocessed/qwen3
-output_root: output/qwen3
+output_root: output/qwen3_lesstricks
 
 whole_pipeline_clips_sequentially: true
 
