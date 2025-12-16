@@ -567,6 +567,8 @@ def da3(clip: DictConfig, cfg: DictConfig):
     # we need subfolder "images" because it's hardcoded in 4dlangsplat loading code
     rgb_dir = clip_dir / "rgb"
     images_dir = clip_dir / "images"
+    if images_dir.exists():
+        shutil.rmtree(images_dir)
     rgb_dir.rename(images_dir)
 
     # load da3 model
@@ -598,6 +600,7 @@ def da3(clip: DictConfig, cfg: DictConfig):
         image_filenames,
         single_view_idx=cfg.preprocessing.da3_pc_frame_number,
         conf_thresh_percentile=cfg.preprocessing.da3_conf_thresh_percentile,
+        pixel_stride=cfg.preprocessing.da3_pc_pixel_stride,
     )
 
     # store depth maps and confidence mapsin original resolution

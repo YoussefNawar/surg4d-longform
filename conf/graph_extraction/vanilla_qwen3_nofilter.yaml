@@ -14,7 +14,8 @@ checkpoint_subdir: ${autoencoder.checkpoint_subdir}
 full_dim: ${autoencoder.full_dim}
 latent_dim: ${autoencoder.latent_dim}
 
-# ! filtering does not make sense without densification so disable
+# gaussian filtering before clustering
+# relevance is defined as opacity * ||language_feature||_2 in latent space
 relevance_threshold: 0.0
 
 # clustering
@@ -23,7 +24,7 @@ cluster_method: hdbscan # one of: [spectral, hdbscan]
 # hdbscan clustering
 # "custom metric" does cos dist on lang part and l2 on pos part
 # "vanilla metric" concats both and does whatever metric is set
-custom_cluster_metric: false
+custom_cluster_metric: false # ! does not run on camp due to too little RAM
 clustering_weights:
   position: 1.0
   instance: 2.0
@@ -59,7 +60,7 @@ decode_batch_size: 1024
 
 # graph
 n_timesteps: 20
-graph_edge_threshold: 0.02 # ! more lavish threshold since there will be less noisy gaussians randomly overlapping
+graph_edge_threshold: 0.05 # edge if bhattacharyya coefficient >= threshold
 
 # outputs
 store_verbose: true  # save verbose outputs (renders, palettes, raw gaussians, etc.)

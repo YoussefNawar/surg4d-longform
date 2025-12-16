@@ -26,6 +26,7 @@ vipe_depth_step: 16 # stride for depth maps that end up in pointclouds, only use
 da3_pc_frame_number: 40
 da3_visualize: true
 da3_conf_thresh_percentile: 0.0
+da3_pc_pixel_stride: 3 # stride for subsampling point cloud pixels (e.g., 3 = every 3rd pixel = 1/9 points)
 
 verbose_output: false # keep intermediate output files (mostly vipe)
 pc_ply_visualization_filename: pointcloud_viz.ply # set to None to disable

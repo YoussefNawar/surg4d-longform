@@ -15,10 +15,14 @@ def da3_to_single_view_colmap(
     single_view_idx: int,
     conf_thresh_percentile: float = 40.0,
     process_res_method: str = "upper_bound_resize",
+    pixel_stride: int = 1,
 ):
     """
     Export COLMAP format with points only from a single view.
     All cameras/images are still added, but only the selected view has point observations.
+    
+    Args:
+        pixel_stride: Stride for subsampling pixels (e.g., 3 = every 3rd pixel = 1/9 points)
     """
     # 1. Data preparation - only process the single view
     conf_thresh = np.percentile(prediction.conf, conf_thresh_percentile)
@@ -29,6 +33,21 @@ def da3_to_single_view_colmap(
     single_extrinsics = prediction.extrinsics[single_view_idx : single_view_idx + 1]
     single_images = prediction.processed_images[single_view_idx : single_view_idx + 1]
     single_conf = prediction.conf[single_view_idx : single_view_idx + 1]
+
+    # Apply pixel stride subsampling if requested
+    if pixel_stride > 1:
+        # Subsample depth, confidence, and images
+        single_depth = single_depth[:, ::pixel_stride, ::pixel_stride]
+        single_conf = single_conf[:, ::pixel_stride, ::pixel_stride]
+        single_images = single_images[:, ::pixel_stride, ::pixel_stride, :]
+        
+        # Adjust intrinsics for subsampled resolution
+        single_intrinsics = single_intrinsics.copy()
+        # Scale focal lengths and principal point by the stride
+        single_intrinsics[:, 0, 0] /= pixel_stride  # fx
+        single_intrinsics[:, 1, 1] /= pixel_stride  # fy
+        single_intrinsics[:, 0, 2] /= pixel_stride  # cx
+        single_intrinsics[:, 1, 2] /= pixel_stride  # cy
 
     # Get points only from the single view
     points, colors = _depths_to_world_points_with_colors(
@@ -44,9 +63,12 @@ def da3_to_single_view_colmap(
     num_frames = len(prediction.processed_images)
     h, w = prediction.processed_images.shape[1:3]
 
+    # Get the actual height and width after subsampling
+    h_subsampled, w_subsampled = single_depth.shape[1:3]
+
     # Create xyf mapping only for the single view
     # Reshape to match the filtering used in _depths_to_world_points_with_colors
-    points_xyf_single = _create_xyf(1, h, w)  # Shape: (1, h, w, 3)
+    points_xyf_single = _create_xyf(1, h_subsampled, w_subsampled)  # Shape: (1, h, w, 3)
     points_xyf_single = points_xyf_single.reshape(-1, 3)  # Shape: (h*w, 3)
     # Filter by confidence (same as in _depths_to_world_points_with_colors)
     valid_mask = (
@@ -135,8 +157,10 @@ def da3_to_single_view_colmap(
             # Add all points from this view
             for vidx in range(num_points):
                 point2d = points_xyf_single[vidx][:2].copy()
-                point2d[0] *= orig_w / w
-                point2d[1] *= orig_h / h
+                # Scale from subsampled resolution to original resolution
+                # First scale from subsampled to full processing resolution, then to original
+                point2d[0] *= (w / w_subsampled) * (orig_w / w)
+                point2d[1] *= (h / h_subsampled) * (orig_h / h)
                 point3d_id = point3d_ids[vidx]
                 point2d_list.append(pycolmap.Point2D(point2d, point3d_id))
                 # Update the track for this point
