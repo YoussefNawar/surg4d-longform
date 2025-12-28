@@ -65,7 +65,7 @@ static_graph_prompt_template: |
   QUERY CONCEPT: '{substring}'
 
   Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
-  Example (format only): {"x": 0.12, "y": -0.08, "z": 0.95}
+  Example (format only): {{"x": 0.12, "y": -0.08, "z": 0.95}}
 
 # frame_attn: attention scores over frame patches
 frame_attn_system_prompt: |
@@ -92,7 +92,7 @@ frame_attn_refine_prompt_template: |
   QUERY CONCEPT: '{substring}'
 
   Output format: respond ONLY with a valid JSON object having numeric fields x, y.
-  Example (format only): {"x": 112.0, "y": 256.0}
+  Example (format only): {{"x": 112.0, "y": 256.0}}
 
 # frame direct: directly ask qwen to return a pixel on the image
 frame_direct_system_prompt: |
@@ -110,7 +110,7 @@ frame_direct_prompt_template: |
   QUERY CONCEPT: '{substring}'
 
   Output format: respond ONLY with a valid JSON object having numeric fields x, y.
-  Example (format only): {"x": 112.0, "y": 256.0}
+  Example (format only): {{"x": 112.0, "y": 256.0}}
 
 # graph agent: agentic graph prompting with tools (requires qwen3)
 graph_agent_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
@@ -177,7 +177,7 @@ graph_agent_prompt_template: |
   QUERY CONCEPT: '{substring}'
 
   Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
-  Example (format only): {"x": 0.12, "y": -0.08, "z": 0.95}
+  Example (format only): {{"x": 0.12, "y": -0.08, "z": 0.95}}
 
 
 # splat graph: 3d point proposals by splat attention, final 3d point by qwen, project to 2d
@@ -223,4 +223,4 @@ splat_graph_prompt_template: |
   QUERY CONCEPT: '{substring}'
 
   Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
-  Example (format only): {"x": 0.12, "y": -0.08, "z": 0.95}
+  Example (format only): {{"x": 0.12, "y": -0.08, "z": 0.95}}

@@ -11,9 +11,11 @@ from transformers import (
     Qwen3VLProcessor,
 )
 from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+from transformers.video_utils import VideoMetadata
 from typing import Dict, List, Optional, Union, Any, Callable, Tuple
 from functools import lru_cache
 from transformers.utils.quantization_config import BitsAndBytesConfig
+from qwen_vl_utils import process_vision_info
 
 from .patched_qwen import (
     PatchedQwen2_5_VLForConditionalGeneration,
@@ -1328,6 +1330,8 @@ def prompt_with_dynamic_graph(
     qwen_version: str = "qwen25",
     system_prompt: str = None,
     tools: Dict[str, Tuple[Callable, Dict[str, Any]]] = {},
+    max_iterations: int = 10,
+    tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
 ):
     assert (
         len(adjacency_matrices)
@@ -1436,6 +1440,8 @@ def prompt_with_dynamic_graph(
             tools=tools,
             qwen_version=qwen_version,
             max_tokens=5012,
+            max_iterations=max_iterations,
+            tool_call_limits=tool_call_limits,
         )
     else:
         return generate_with_vision_features(
@@ -1602,6 +1608,106 @@ def prompt_with_dynamic_descriptors(
             qwen_version=qwen_version,
             max_tokens=5012,
         )
+
+
+def prompt_with_video_frames(
+    question: str,
+    image_paths: List[Any],
+    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
+    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
+    qwen_version: str = "qwen3",
+    system_prompt: str = None,
+    max_tokens: int = 2048,
+    fps: float = None,
+) -> str:
+    """Prompt model with video frames (list of images).
+    
+    Args:
+        question: Question to ask about the video
+        image_paths: List of image file paths (as strings or Path objects)
+        model: Qwen VL model
+        processor: Qwen VL processor
+        qwen_version: Either "qwen25" or "qwen3"
+        system_prompt: Optional system prompt
+        max_tokens: Maximum tokens to generate
+        fps: Optional frames per second for video metadata
+        
+    Returns:
+        Model response text
+    """
+    # Convert paths to strings
+    image_paths_str = [str(p) for p in image_paths]
+    
+    # Build messages with video content
+    content = []
+    video_content = {"type": "video", "video": image_paths_str}
+    if fps is not None:
+        # raw_fps: actual framerate used in video_metadata
+        # sample_fps: sampling rate passed to processor for frame selection
+        video_content["raw_fps"] = fps
+        video_content["sample_fps"] = fps
+    content.append(video_content)
+    content.append({"type": "text", "text": question})
+    
+    messages = []
+    if system_prompt:
+        messages.append({
+            "role": "system",
+            "content": [{"type": "text", "text": system_prompt}]
+        })
+    messages.append({"role": "user", "content": content})
+    
+    # Apply chat template
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    
+    # Process vision info to extract images and videos
+    # Note: raw_fps and sample_fps in video_content create metadata internally in qwen_vl_utils
+    image_inputs, video_inputs = process_vision_info(messages)
+    
+    # Create VideoMetadata for explicit fps specification
+    # This ensures the model knows the correct temporal spacing between frames
+    video_metadata = None
+    if fps is not None and video_inputs is not None:
+        num_frames = len(image_paths)
+        video_metadata = [
+            VideoMetadata(
+                total_num_frames=num_frames,
+                fps=fps,
+                frames_indices=list(range(num_frames))
+            )
+        ]
+    
+    # Prepare inputs
+    # CRITICAL: Set do_sample_frames=False to prevent processor from resampling our pre-selected frames
+    # Pass video_metadata explicitly to ensure model gets correct fps
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        video_metadata=video_metadata,
+        do_sample_frames=False,
+        padding=True,
+        return_tensors="pt",
+    ).to(model.device)
+    
+    # Generate
+    with torch.no_grad():
+        generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
+    
+    # Decode
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] 
+        for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    output_text = processor.batch_decode(
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False
+    )[0]
+    
+    return output_text
 
 
 def crop_patch_features(patch_feat: torch.Tensor, cw, ch, cx1, cx2, cy1, cy2):

@@ -1,16 +1,19 @@
 defaults:
   # - triplets: default
-  # - temporal: default
-  - spatial: default
+  - temporal: default
+  # - spatial: default
   - _self_
 
 # nulling skips - comment out to enable
 triplets: null
-temporal: null
-# spatial: null
+# temporal: null
+spatial: null
 
 # Qwen version for evaluation (should match feature_extraction.qwen_version)
 qwen_version: ${feature_extraction.qwen_version}
+
+# Video metadata for all evaluations
+video_fps: 25  # Original video framerate (Cholec80 is 25 fps)
 
 # Quantization settings for the evaluation model (used across all eval stages)
 use_bnb_4bit: false

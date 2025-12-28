@@ -417,9 +417,7 @@ def inspect_node_through_time(
         node_id: The node/cluster id to inspect
 
     Returns:
-        Dict with "text" and "vision_features" for the node through all timesteps.
-        Text format matches the initial graph representation in prompt_graph_agent,
-        with timestep wrappers around each timestep's data.
+        Dict with "text" (JSON) and "vision_features" for the node through all timesteps.
     """
     n_timesteps = centroids.shape[0]
     n_nodes = centroids.shape[1]
@@ -439,8 +437,8 @@ def inspect_node_through_time(
         }
     node_features = qwen_feats[str(node_id)]  # (T, n_feats, dim)
 
-    # Build XML-like text representation similar to prompt_graph_agent
-    text_parts = [f'<node-through-time node-id="{node_id}">\n']
+    # Build JSON representation
+    timesteps_data = []
     vision_features = []
 
     for t in range(n_timesteps):
@@ -448,26 +446,34 @@ def inspect_node_through_time(
         ctr = centers[t, node_id]
         ext = extents[t, node_id]
 
-        text_parts.extend(
-            [
-                f'<timestep t="{t}">\n',
-                "<lowres-visual-descriptor>",
-                IMAGE_PLACEHOLDER,
-                "</lowres-visual-descriptor>\n",
-                f'<centroid x="{c[0]:.2f}" y="{c[1]:.2f}" z="{c[2]:.2f}"/>\n',
-                f'<bbox-center x="{ctr[0]:.2f}" y="{ctr[1]:.2f}" z="{ctr[2]:.2f}"/>\n',
-                f'<bbox-extent x="{ext[0]:.2f}" y="{ext[1]:.2f}" z="{ext[2]:.2f}"/>\n',
-                "</timestep>\n",
-            ]
-        )
+        timesteps_data.append({
+            "timestep": int(t),
+            "lowres_visual_descriptor": IMAGE_PLACEHOLDER,
+            "centroid": {
+                "x": round(float(c[0]), 2),
+                "y": round(float(c[1]), 2),
+                "z": round(float(c[2]), 2),
+            },
+            "bbox_center": {
+                "x": round(float(ctr[0]), 2),
+                "y": round(float(ctr[1]), 2),
+                "z": round(float(ctr[2]), 2),
+            },
+            "bbox_extent": {
+                "x": round(float(ext[0]), 2),
+                "y": round(float(ext[1]), 2),
+                "z": round(float(ext[2]), 2),
+            },
+        })
 
         # Add vision features for this timestep
         vision_features.append(torch.Tensor(node_features[t]))
 
-    text_parts.append("</node-through-time>")
-
     return {
-        "text": "".join(text_parts),
+        "text": json.dumps({
+            "node_id": int(node_id),
+            "timesteps": timesteps_data,
+        }),
         "vision_features": vision_features,
     }
 
@@ -508,8 +514,7 @@ def inspect_scene_at_time(
         timestep: The timestep to inspect
 
     Returns:
-        Dict with "text" and "vision_features" for all nodes at the timestep.
-        Text format matches the initial graph representation in prompt_graph_agent.
+        Dict with "text" (JSON) and "vision_features" for all nodes at the timestep.
     """
     n_timesteps = centroids.shape[0]
     n_nodes = centroids.shape[1]
@@ -526,8 +531,8 @@ def inspect_scene_at_time(
     node_feat_indices = sorted(list(qwen_feats.keys()), key=lambda x: int(x))
     node_feats_at_t = [qwen_feats[idx][timestep] for idx in node_feat_indices]
 
-    # Build XML-like text representation matching prompt_graph_agent format
-    text_parts = [f'<graph-nodes t="{timestep}">\n']
+    # Build JSON representation
+    nodes_data = []
     vision_features = []
 
     for n in range(n_nodes):
@@ -535,26 +540,34 @@ def inspect_scene_at_time(
         ctr = centers[timestep, n]
         ext = extents[timestep, n]
 
-        text_parts.extend(
-            [
-                f'<node id="{n}">\n',
-                "<lowres-visual-descriptor>",
-                IMAGE_PLACEHOLDER,
-                "</lowres-visual-descriptor>\n",
-                f'<centroid x="{c[0]:.2f}" y="{c[1]:.2f}" z="{c[2]:.2f}"/>\n',
-                f'<bbox-center x="{ctr[0]:.2f}" y="{ctr[1]:.2f}" z="{ctr[2]:.2f}"/>\n',
-                f'<bbox-extent x="{ext[0]:.2f}" y="{ext[1]:.2f}" z="{ext[2]:.2f}"/>\n',
-                "</node>\n",
-            ]
-        )
+        nodes_data.append({
+            "node_id": int(n),
+            "lowres_visual_descriptor": IMAGE_PLACEHOLDER,
+            "centroid": {
+                "x": round(float(c[0]), 2),
+                "y": round(float(c[1]), 2),
+                "z": round(float(c[2]), 2),
+            },
+            "bbox_center": {
+                "x": round(float(ctr[0]), 2),
+                "y": round(float(ctr[1]), 2),
+                "z": round(float(ctr[2]), 2),
+            },
+            "bbox_extent": {
+                "x": round(float(ext[0]), 2),
+                "y": round(float(ext[1]), 2),
+                "z": round(float(ext[2]), 2),
+            },
+        })
 
         # Add vision features for this node
         vision_features.append(torch.Tensor(node_feats_at_t[n]))
 
-    text_parts.append("</graph-nodes>")
-
     return {
-        "text": "".join(text_parts),
+        "text": json.dumps({
+            "timestep": int(timestep),
+            "nodes": nodes_data,
+        }),
         "vision_features": vision_features,
     }
 

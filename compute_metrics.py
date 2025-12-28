@@ -232,348 +232,188 @@ def compute_spatial_metrics(cfg: DictConfig):
 def compute_temporal_metrics(cfg: DictConfig):
     if cfg.compute_metrics.temporal is None:
         return
+    
     cm_cfg = cfg.compute_metrics.temporal
-
+    
     pred_root = Path(cm_cfg.pred_root)
     labels_root = Path(cm_cfg.labels_root)
-    labels_tmpl: str = cm_cfg.labels_filename_template
+    labels_filename_template = str(cm_cfg.labels_filename_template)
     out_dir = Path(cm_cfg.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     aggregated_file = Path(cm_cfg.aggregated_output_filename)
     aggregated_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Metric params: prefer compute_metrics config, fallback to eval config if present
-    tcfg = None
-    try:
-        if hasattr(cm_cfg, 'metrics') and cm_cfg.metrics is not None:
-            tcfg = cm_cfg.metrics
-    except Exception:
-        tcfg = None
-    if tcfg is None:
-        try:
-            if hasattr(cfg, 'eval') and cfg.eval is not None and hasattr(cfg.eval, 'temporal') and cfg.eval.temporal is not None and hasattr(cfg.eval.temporal, 'metrics'):
-                tcfg = cfg.eval.temporal.metrics
-        except Exception:
-            tcfg = None
-    if tcfg is None:
-        tcfg = {}
-
-    # Dataset accumulators per ablation and query type
-    dataset: dict[str, dict[str, list[dict]]] = {}
-
-    # Helpers mirroring evaluator logic
-    def _eval_frame_error(predicted: dict | None, gt: dict, tol: int) -> dict:
-        if predicted is None or 'frame' not in predicted:
-            return {
-                'frame_error': float('inf'),
-                'within_tolerance': False,
-                'tolerance_used': tol,
-                'success': False,
-            }
-        err = abs(int(predicted['frame']) - int(gt['frame']))
-        return {
-            'frame_error': err,
-            'within_tolerance': err <= tol,
-            'tolerance_used': tol,
-            'success': err <= tol,
-        }
-
-    def _eval_iou(predicted: dict | None, gt: dict, thr: float, total_frames: int | None = None) -> dict:
-        if predicted is None or 'ranges' not in predicted:
-            return {
-                'iou': round(0.0, 2),
-                'precision': round(0.0, 2),
-                'recall': round(0.0, 2),
-                'accuracy': round(0.0, 2),
-                'success': False,
-                'threshold': thr,
-            }
-        def ranges_to_set(ranges):
-            s = set()
-            for a, b in ranges:
-                s.update(range(int(a), int(b) + 1))
-            return s
-        gt_frames = ranges_to_set(gt['ranges'])
-        pred_frames = ranges_to_set(predicted['ranges'])
-        inter = len(gt_frames & pred_frames)
-        union = len(gt_frames | pred_frames)
-        iou = inter / union if union > 0 else 0.0
-        prec = inter / len(pred_frames) if len(pred_frames) > 0 else 0.0
-        rec = inter / len(gt_frames) if len(gt_frames) > 0 else 0.0
-        # accuracy over timesteps = (TP + TN) / total_frames
-        # determine total_frames if not provided: fallback to max frame index observed + 1
-        if total_frames is None:
-            max_end_gt = max((int(b) for (_, b) in gt.get('ranges', []) if isinstance(b, (int, float))), default=-1)
-            max_end_pr = max((int(b) for (_, b) in predicted.get('ranges', []) if isinstance(b, (int, float))), default=-1)
-            total_frames = max(max_end_gt, max_end_pr) + 1 if max(max_end_gt, max_end_pr) >= 0 else 0
-        tp = len(gt_frames & pred_frames)
-        tn = max(0, (total_frames or 0) - len(gt_frames | pred_frames))
-        acc = ((tp + tn) / total_frames) if (total_frames and total_frames > 0) else 0.0
-        return {
-            'iou': round(float(iou), 2),
-            'precision': round(float(prec), 2),
-            'recall': round(float(rec), 2),
-            'accuracy': round(float(acc), 2),
-            'success': iou >= thr,
-            'threshold': thr,
-        }
-
-    def _eval_ordering(predicted: dict | None, gt: dict, order_weight: float, iou_weight: float) -> dict:
-        if predicted is None or 'events' not in predicted:
-            return {
-                'order_correct': False,
-                'per_event_iou': [],
-                'mean_iou': round(0.0, 2),
-                'composite_score': round(0.0, 2),
-                'success': False,
-            }
-        pred_events = predicted['events']
-        gt_events = gt['events']
-        order_correct = len(pred_events) == len(gt_events)
-        if order_correct:
-            for i in range(len(pred_events)):
-                if int(pred_events[i].get('order', -1)) != int(gt_events[i]['order']):
-                    order_correct = False
-                    break
-        per_event_iou: list[float] = []
-        for i in range(min(len(pred_events), len(gt_events))):
-            pr = pred_events[i]['frame_range']
-            gr = gt_events[i]['frame_range']
-            pf = set(range(int(pr[0]), int(pr[1]) + 1))
-            gf = set(range(int(gr[0]), int(gr[1]) + 1))
-            inter = len(pf & gf)
-            union = len(pf | gf)
-            per_event_iou.append(inter / union if union > 0 else 0.0)
-        mean_iou = float(np.mean(per_event_iou)) if per_event_iou else 0.0
-        composite = order_weight * (1.0 if order_correct else 0.0) + iou_weight * mean_iou
-        return {
-            'order_correct': order_correct,
-            'per_event_iou': [round(float(x), 2) for x in per_event_iou],
-            'mean_iou': round(float(mean_iou), 2),
-            'composite_score': round(float(composite), 2),
-            'success': composite >= 0.5,
-        }
-
-    def _eval_count(predicted: dict | None, gt: dict, count_weight: float, iou_weight: float) -> dict:
-        if predicted is None or 'count' not in predicted:
-            return {
-                'count_correct': False,
-                'count_error': int(gt['count']),
-                'per_occurrence_iou': [],
-                'mean_iou': round(0.0, 2),
-                'composite_score': round(0.0, 2),
-                'success': False,
-            }
-        pred_count = int(predicted['count'])
-        gt_count = int(gt['count'])
-        pred_occs = predicted.get('occurrences', []) or []
-        gt_occs = gt.get('occurrences', []) or []
-        count_correct = (pred_count == gt_count)
-        count_error = abs(pred_count - gt_count)
-        per_iou: list[float] = []
-        matched = set()
-        for po in pred_occs[:len(gt_occs)]:
-            pf = set(range(int(po[0]), int(po[1]) + 1))
-            best_iou = 0.0
-            best_idx = -1
-            for j, go in enumerate(gt_occs):
-                if j in matched:
-                    continue
-                gf = set(range(int(go[0]), int(go[1]) + 1))
-                inter = len(pf & gf)
-                union = len(pf | gf)
-                iou = inter / union if union > 0 else 0.0
-                if iou > best_iou:
-                    best_iou = iou
-                    best_idx = j
-            if best_idx >= 0:
-                matched.add(best_idx)
-                per_iou.append(best_iou)
-        mean_iou = float(np.mean(per_iou)) if per_iou else 0.0
-        composite = count_weight * (1.0 if count_correct else 0.0) + iou_weight * mean_iou
-        return {
-            'count_correct': count_correct,
-            'count_error': count_error,
-            'pred_count': pred_count,
-            'gt_count': gt_count,
-            'per_occurrence_iou': [round(float(x), 2) for x in per_iou],
-            'mean_iou': round(float(mean_iou), 2),
-            'composite_score': round(float(composite), 2),
-            'success': composite >= 0.5,
-        }
-
-    # Per-clip processing
+    
+    # Dataset-wide accumulators per method (query-wise for micro average)
+    method_all_errors: dict[str, list[float]] = {}
+    method_all_ious: dict[str, list[float]] = {}
+    
+    # Per-clip results
     for clip in cfg.clips:
         clip_name = str(clip.name)
+        labels_path = labels_root / labels_filename_template.format(clip_name=clip_name)
         pred_path = pred_root / f"{clip_name}.json"
-        gt_path = labels_root / labels_tmpl.format(clip_name=clip_name)
-        if not pred_path.exists() or not gt_path.exists():
+        
+        if not labels_path.exists() or not pred_path.exists():
             continue
-
-        with pred_path.open('r') as f:
-            preds = json.load(f)
-        with gt_path.open('r') as f:
-            gt_full = json.load(f)
-        gt_by_id = {a['query_id']: a for a in gt_full.get('annotations', [])}
-        clip_num_frames = int(gt_full.get('clip_info', {}).get('num_frames', 0))
-
-        per_clip_out: dict[str, dict] = {}
-
-        for ablation, items in preds.get('ablations', {}).items():
-            results = []
-            for item in items:
-                qid = item.get('query_id')
-                qtype = item.get('query_type')
-                pred = item.get('predicted')
-                gt_entry = gt_by_id.get(qid, {})
-                gt = gt_entry.get('ground_truth')
-                metrics = {}
-                if gt is not None:
-                    if qtype in ('action_onset', 'action_offset'):
-                        tol = int(tcfg[qtype]['tolerance'])
-                        metrics = _eval_frame_error(pred, gt, tol)
-                    elif qtype == 'action_duration':
-                        thr = float(tcfg[qtype]['threshold'])
-                        metrics = _eval_iou(pred, gt, thr, total_frames=clip_num_frames)
-                    elif qtype == 'multiple_event_ordering':
-                        ow = float(tcfg[qtype]['order_weight'])
-                        iw = float(tcfg[qtype]['iou_weight'])
-                        metrics = _eval_ordering(pred, gt, ow, iw)
-                    elif qtype == 'count_frequency':
-                        cw = float(tcfg[qtype]['count_weight'])
-                        iw = float(tcfg[qtype]['iou_weight'])
-                        metrics = _eval_count(pred, gt, cw, iw)
-                results.append({
-                    'query_id': qid,
-                    'query_type': qtype,
-                    'question': item.get('question'),
-                    'predicted': pred,
-                    'ground_truth': gt,
-                    'metrics': metrics,
-                    'raw_response': item.get('raw_response'),
-                })
-
-            # Aggregate per ablation for this clip
-            by_type: dict[str, list[dict]] = {}
-            for r in results:
-                by_type.setdefault(r['query_type'], []).append(r)
-
-            aggregated: dict[str, dict] = {}
-            # action_onset/offset
-            for qtype in ('action_onset', 'action_offset'):
-                qres = by_type.get(qtype, [])
-                if qres:
-                    errors = [m['metrics']['frame_error'] for m in qres if m['metrics'].get('frame_error') != float('inf')]
-                    success_rate = sum(1 for m in qres if m['metrics'].get('success')) / len(qres)
-                    aggregated[qtype] = {
-                        'mean_frame_error': (round(float(np.mean(errors)), 2) if errors else float('inf')),
-                        'success_rate': round(float(success_rate), 2),
-                        'count': len(qres),
-                    }
-            # action_duration
-            qres = by_type.get('action_duration', [])
-            if qres:
-                ious = [m['metrics'].get('iou', 0.0) for m in qres]
-                accs = [m['metrics'].get('accuracy', 0.0) for m in qres]
-                success_rate = sum(1 for m in qres if m['metrics'].get('success')) / len(qres)
-                aggregated['action_duration'] = {
-                    'mean_iou': round(float(np.mean(ious)), 2) if ious else round(0.0, 2),
-                    'mean_accuracy': round(float(np.mean(accs)), 2) if accs else round(0.0, 2),
-                    'success_rate': round(float(success_rate), 2),
-                    'count': len(qres),
-                }
-            # multiple_event_ordering
-            qres = by_type.get('multiple_event_ordering', [])
-            if qres:
-                scores = [m['metrics'].get('composite_score', 0.0) for m in qres]
-                order_correct_rate = sum(1 for m in qres if m['metrics'].get('order_correct')) / len(qres)
-                mean_ious = [m['metrics'].get('mean_iou', 0.0) for m in qres]
-                aggregated['multiple_event_ordering'] = {
-                    'mean_composite_score': round(float(np.mean(scores)), 2) if scores else round(0.0, 2),
-                    'order_correct_rate': round(float(order_correct_rate), 2),
-                    'mean_iou': round(float(np.mean(mean_ious)), 2) if mean_ious else round(0.0, 2),
-                    'count': len(qres),
-                }
-            # count_frequency
-            qres = by_type.get('count_frequency', [])
-            if qres:
-                scores = [m['metrics'].get('composite_score', 0.0) for m in qres]
-                count_correct_rate = sum(1 for m in qres if m['metrics'].get('count_correct')) / len(qres)
-                mean_ious = [m['metrics'].get('mean_iou', 0.0) for m in qres]
-                aggregated['count_frequency'] = {
-                    'mean_composite_score': round(float(np.mean(scores)), 2) if scores else round(0.0, 2),
-                    'count_correct_rate': round(float(count_correct_rate), 2),
-                    'mean_iou': round(float(np.mean(mean_ious)), 2) if mean_ious else round(0.0, 2),
-                    'count': len(qres),
-                }
-
-            per_clip_out[ablation] = {
-                'metrics': aggregated,
-                'results': results,
+        
+        with labels_path.open("r") as f:
+            labels_data = json.load(f)
+        with pred_path.open("r") as f:
+            preds_data = json.load(f)
+        
+        # Extract num_timesteps from ground truth clip info
+        clip_info = labels_data.get("clip_info", {})
+        num_timesteps = int(clip_info["num_frames"])
+        
+        annotations = labels_data.get("annotations", [])
+        methods_preds = preds_data.get("methods", {})
+        
+        clip_results: dict[str, dict] = {}
+        
+        # Process each method
+        for method_name, method_preds in methods_preds.items():
+            # Initialize method accumulators if not exists
+            if method_name not in method_all_errors:
+                method_all_errors[method_name] = []
+                method_all_ious[method_name] = []
+            
+            method_errors: list[float] = []
+            method_ious: list[float] = []
+            query_results: list[dict] = []
+            
+            # Create a mapping from query_id to predictions
+            pred_by_query_id: dict[str, dict] = {}
+            for pred_item in method_preds:
+                query_id = pred_item.get("query_id")
+                if query_id:
+                    pred_by_query_id[query_id] = pred_item
+            
+            # Process each annotation
+            for annotation in annotations:
+                query_id = str(annotation.get("query_id"))
+                query_type = str(annotation.get("query_type"))
+                question = str(annotation.get("question"))
+                ground_truth = annotation.get("ground_truth", {})
+                
+                pred_item = pred_by_query_id.get(query_id)
+                
+                if query_type == "action_onset":
+                    # Ground truth uses "frame" key (ground truth annotations use this terminology)
+                    gt_timestep = int(ground_truth["frame"])
+                    
+                    if pred_item and pred_item.get("predicted"):
+                        pred_timestep = int(pred_item["predicted"]["timestep"])
+                        error = abs(pred_timestep - gt_timestep)
+                    else:
+                        # No prediction or parsing failed
+                        error = float(num_timesteps)
+                    
+                    method_errors.append(error)
+                    method_all_errors[method_name].append(error)
+                    
+                    query_results.append({
+                        "query_id": query_id,
+                        "query_type": query_type,
+                        "question": question,
+                        "ground_truth_timestep": gt_timestep,
+                        "predicted_timestep": pred_item["predicted"].get("timestep") if pred_item and pred_item.get("predicted") else None,
+                        "absolute_error": float(error),
+                    })
+                    
+                elif query_type == "action_duration":
+                    # Ground truth ranges (inclusive)
+                    gt_ranges = ground_truth["ranges"]
+                    
+                    if pred_item and pred_item.get("predicted"):
+                        pred_ranges = pred_item["predicted"]["ranges"]
+                        iou = compute_temporal_iou(gt_ranges, pred_ranges, num_timesteps)
+                    else:
+                        # No prediction or parsing failed
+                        iou = 0.0
+                    
+                    method_ious.append(iou)
+                    method_all_ious[method_name].append(iou)
+                    
+                    query_results.append({
+                        "query_id": query_id,
+                        "query_type": query_type,
+                        "question": question,
+                        "ground_truth_ranges": gt_ranges,
+                        "predicted_ranges": pred_item["predicted"].get("ranges") if pred_item and pred_item.get("predicted") else None,
+                        "iou": float(iou),
+                    })
+            
+            # Compute per-method averages for this clip
+            clip_results[method_name] = {
+                "queries": query_results,
+                "num_queries": len(query_results),
+                "mean_absolute_error": round(float(np.mean(method_errors)), 2) if method_errors else None,
+                "mean_iou": round(float(np.mean(method_ious)), 2) if method_ious else None,
             }
+        
+        # Save per-clip results
+        with (out_dir / f"{clip_name}.json").open("w") as f:
+            json.dump({
+                "clip": clip_name,
+                "methods": clip_results,
+            }, f, indent=2)
+    
+    # Compute aggregated metrics per method (micro average over all queries)
+    aggregated: dict[str, dict] = {}
+    for method_name in method_all_errors.keys() | method_all_ious.keys():
+        errors = method_all_errors.get(method_name, [])
+        ious = method_all_ious.get(method_name, [])
+        
+        aggregated[method_name] = {
+            "mean_absolute_error": round(float(np.mean(errors)), 2) if errors else None,
+            "std_absolute_error": round(float(np.std(errors)), 2) if errors else None,
+            "mean_iou": round(float(np.mean(ious)), 3) if ious else None,
+            "std_iou": round(float(np.std(ious)), 3) if ious else None,
+            "num_onset_queries": len(errors),
+            "num_duration_queries": len(ious),
+            "total_queries": len(errors) + len(ious),
+        }
+    
+    with aggregated_file.open("w") as f:
+        json.dump({"methods": aggregated}, f, indent=2)
 
-            # Add to dataset accumulators
-            dataset.setdefault(ablation, {}).setdefault('items', []).extend(results)
 
-        # Save per-clip results file
-        with (out_dir / f"{clip_name}.json").open('w') as f:
-            json.dump({'clip': clip_name, 'ablations': per_clip_out}, f, indent=2)
-
-    # Aggregate dataset-wide per ablation
-    summary: dict[str, dict] = {}
-    for ablation, data in dataset.items():
-        items = data.get('items', [])
-        by_type: dict[str, list[dict]] = {}
-        for r in items:
-            by_type.setdefault(r['query_type'], []).append(r)
-        agg: dict[str, dict] = {}
-        for qtype in ('action_onset', 'action_offset'):
-            qres = by_type.get(qtype, [])
-            if qres:
-                errors = [m['metrics']['frame_error'] for m in qres if m['metrics'].get('frame_error') != float('inf')]
-                success_rate = sum(1 for m in qres if m['metrics'].get('success')) / len(qres)
-                agg[qtype] = {
-                    'mean_frame_error': (round(float(np.mean(errors)), 2) if errors else float('inf')),
-                    'success_rate': round(float(success_rate), 2),
-                    'count': len(qres),
-                }
-        qres = by_type.get('action_duration', [])
-        if qres:
-            ious = [m['metrics'].get('iou', 0.0) for m in qres]
-            accs = [m['metrics'].get('accuracy', 0.0) for m in qres]
-            success_rate = sum(1 for m in qres if m['metrics'].get('success')) / len(qres)
-            agg['action_duration'] = {
-                'mean_iou': round(float(np.mean(ious)), 2) if ious else round(0.0, 2),
-                'mean_accuracy': round(float(np.mean(accs)), 2) if accs else round(0.0, 2),
-                'success_rate': round(float(success_rate), 2),
-                'count': len(qres),
-            }
-        qres = by_type.get('multiple_event_ordering', [])
-        if qres:
-            scores = [m['metrics'].get('composite_score', 0.0) for m in qres]
-            order_correct_rate = sum(1 for m in qres if m['metrics'].get('order_correct')) / len(qres)
-            mean_ious = [m['metrics'].get('mean_iou', 0.0) for m in qres]
-            agg['multiple_event_ordering'] = {
-                'mean_composite_score': round(float(np.mean(scores)), 2) if scores else round(0.0, 2),
-                'order_correct_rate': round(float(order_correct_rate), 2),
-                'mean_iou': round(float(np.mean(mean_ious)), 2) if mean_ious else round(0.0, 2),
-                'count': len(qres),
-            }
-        qres = by_type.get('count_frequency', [])
-        if qres:
-            scores = [m['metrics'].get('composite_score', 0.0) for m in qres]
-            count_correct_rate = sum(1 for m in qres if m['metrics'].get('count_correct')) / len(qres)
-            mean_ious = [m['metrics'].get('mean_iou', 0.0) for m in qres]
-            agg['count_frequency'] = {
-                'mean_composite_score': round(float(np.mean(scores)), 2) if scores else round(0.0, 2),
-                'count_correct_rate': round(float(count_correct_rate), 2),
-                'mean_iou': round(float(np.mean(mean_ious)), 2) if mean_ious else round(0.0, 2),
-                'count': len(qres),
-            }
-        summary[ablation] = {'metrics': agg}
-
-    with aggregated_file.open('w') as f:
-        json.dump({'ablations': summary}, f, indent=2)
+def compute_temporal_iou(gt_ranges: list[list[int]], pred_ranges: list[list[int]], max_timestep: int) -> float:
+    """Compute IoU between ground truth and predicted temporal ranges.
+    
+    Args:
+        gt_ranges: List of [start, end] ranges (inclusive) from ground truth
+        pred_ranges: List of [start, end] ranges (inclusive) from predictions
+        max_timestep: Maximum timestep value (for clipping)
+        
+    Returns:
+        IoU score between 0 and 1
+    """
+    # Convert ranges to sets of timesteps
+    gt_timesteps: set[int] = set()
+    for start, end in gt_ranges:
+        # Ranges are inclusive
+        for t in range(int(start), int(end) + 1):
+            if 0 <= t < max_timestep:
+                gt_timesteps.add(t)
+    
+    pred_timesteps: set[int] = set()
+    for start, end in pred_ranges:
+        # Ranges are inclusive
+        for t in range(int(start), int(end) + 1):
+            if 0 <= t < max_timestep:
+                pred_timesteps.add(t)
+    
+    if len(gt_timesteps) == 0 and len(pred_timesteps) == 0:
+        return 1.0
+    
+    if len(gt_timesteps) == 0 or len(pred_timesteps) == 0:
+        return 0.0
+    
+    intersection = len(gt_timesteps & pred_timesteps)
+    union = len(gt_timesteps | pred_timesteps)
+    
+    return float(intersection) / float(union) if union > 0 else 0.0
 
 def compute_triplets_metrics(cfg: DictConfig):
     if cfg.compute_metrics.triplets is None:

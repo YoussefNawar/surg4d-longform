@@ -10,6 +10,7 @@ import re
 import json
 
 from benchmark.graph_utils import get_coord_transformations
+from benchmark.serialization_utils import sanitize_tool_calls
 from llm.qwen_utils import (
     get_patched_qwen,
     model_inputs,
@@ -690,19 +691,6 @@ def _parse_pixel_from_json(
     return None
 
 
-def _format_only_substring(template: str, substring: str) -> str:
-    """Safely format only the {substring} placeholder, escaping all other braces.
-
-    This allows examples like {"x": 0.1} in the prompt without triggering str.format
-    KeyErrors. Usage: question = _format_only_substring(tmpl, substring)
-    """
-    # First escape all braces
-    safe = template.replace("{", "{{").replace("}", "}}")
-    # Then unescape the placeholder we want to actually format
-    safe = safe.replace("{{substring}}", "{substring}")
-    return safe.format(substring=substring)
-
-
 def static_graph_predict_query_list(
     queries_list,
     *,
@@ -736,7 +724,7 @@ def static_graph_predict_query_list(
 
     for query in queries_list:
         substring = query["query"]
-        question = _format_only_substring(prompt_template, substring)
+        question = prompt_template.format(substring=substring)
 
         # Call Qwen with the graph at this specific timestep
         response = prompt_with_graph_at_timestep(
@@ -957,7 +945,7 @@ def splat_graph_predict_query_list(
                 )
 
         # Build question for static-graph step, embedding proposals textually
-        question = _format_only_substring(prompt_template_graph, substring)
+        question = prompt_template_graph.format(substring=substring)
         if include_scores_in_context:
             lines = [
                 "Candidate 3D proposals (x, y, z) with attention scores:",
@@ -1140,24 +1128,6 @@ def splat_graph_feat_queries(
     return results
 
 
-def _sanitize_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Remove non-JSON-serializable objects (tensors) from tool call results."""
-    sanitized = []
-    for tc in tool_calls:
-        clean_tc = {
-            "tool_name": tc.get("tool_name"),
-            "arguments": tc.get("arguments"),
-        }
-        # Only keep the text part of results, drop vision_features (tensors)
-        result = tc.get("result", {})
-        if isinstance(result, dict):
-            clean_tc["result"] = {"text": result.get("text", "")}
-        else:
-            clean_tc["result"] = str(result)
-        sanitized.append(clean_tc)
-    return sanitized
-
-
 def graph_agent_predict_query_list(
     queries_list,
     *,
@@ -1191,7 +1161,7 @@ def graph_agent_predict_query_list(
 
     for query in queries_list:
         substring = query["query"]
-        question = _format_only_substring(prompt_template, substring)
+        question = prompt_template.format(substring=substring)
 
         # Call Qwen agent with the graph at this specific timestep
         agent_result = prompt_graph_agent(
@@ -1213,7 +1183,7 @@ def graph_agent_predict_query_list(
         response = agent_result["final_answer"]
 
         point3d = _parse_point_from_json(response)
-        sanitized_tool_calls = _sanitize_tool_calls(agent_result.get("tool_calls", []))
+        sanitized_tool_calls = sanitize_tool_calls(agent_result.get("tool_calls", []))
         message_history = agent_result.get("message_history", [])
         if point3d is None:
             # 3D failure: fall back to 2D corner pixel (0,0), omit 3D position to avoid skew
@@ -1516,7 +1486,7 @@ def frame_attn_refine_predict_query_list(
         )
 
         # Prepare refine prompt with proposals
-        question = _format_only_substring(prompt_template_refine, substring)
+        question = prompt_template_refine.format(substring=substring)
         if pixels.shape[0] > 0:
             # For Qwen3, convert pixel proposals to [0, 1000] coordinate system
             if qwen_version == "qwen3":
@@ -1719,7 +1689,7 @@ def frame_direct_predict_query_list(
     outputs = []
     for query in queries_list:
         substring = query["query"]
-        question = _format_only_substring(prompt_template, substring)
+        question = prompt_template.format(substring=substring)
 
         response = ask_qwen_about_image(
             image=image,
