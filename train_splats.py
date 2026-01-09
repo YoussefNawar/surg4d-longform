@@ -67,6 +67,8 @@ def train_splat(clip: DictConfig, cfg: DictConfig):
     parser.add_argument("--resume_from_iter", type=int, default=-1)
     parser.add_argument("--depth_loss_weight", type=float, default=0.0)
     parser.add_argument("--opacity_loss_weight", type=float, default=0.0)
+    parser.add_argument("--flow_loss_weight", type=float, default=0.0)
+    parser.add_argument("--flow_thresh", type=float, default=0.1)
     parser.add_argument("--coarse_freeze_xyz", action="store_true")
     parser.add_argument("--coarse_frame_idx", type=int, default=None)
     # Progressive window arguments for fine stage training
@@ -96,6 +98,10 @@ def train_splat(clip: DictConfig, cfg: DictConfig):
         str(cfg.splat.depth_loss_weight),
         "--opacity_loss_weight",
         str(cfg.splat.opacity_loss_weight),
+        "--flow_loss_weight",
+        str(cfg.splat.get("flow_loss_weight", 0.0)),
+        "--flow_thresh",
+        str(cfg.splat.get("flow_thresh", 0.1)),
     ]
     
     # Add coarse_freeze_xyz flag if enabled
@@ -332,6 +338,8 @@ def main(cfg: DictConfig):
 
     for clip in tqdm(cfg.clips, desc="Training splats", unit="clip"):
         train_splat(clip, cfg)
+        # TODO: only for debugging, remove later
+        break
 
 
 if __name__ == "__main__":

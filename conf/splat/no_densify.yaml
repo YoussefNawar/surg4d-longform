@@ -1,21 +1,26 @@
 config_path: arguments/cholecseg8k/no_tv.py # this config disables total variation losses
 
-depth_loss_weight: 1.0 
+depth_loss_weight: 1.0
 opacity_loss_weight: 0.0 # does not make sense without densification
+
+# Optical flow loss: encourages Gaussian flow to match RAFT optical flow
+flow_loss_weight: 0.01  # set > 0 to enable (e.g., 0.1), only active in fine stages
+flow_thresh: 0.1  # threshold for large motion mask (filter out noise)
 
 dynamic_language: true
 dynamic_scale: false
 dynamic_color: false
 
 # coarse iterations cut by 10x because we're only overfitting the feature heads on a single frame
-coarse_base_iterations: 300
-coarse_lang_iterations: 100
+coarse_base_iterations: 10
+coarse_lang_iterations: 10
 fine_base_iterations: 10000
 fine_lang_iterations: 10000
 
 # settings for simplifying coarse training for high quality initial depth map
-densify_until_iter: 0 # don't densify at all
-coarse_freeze_xyz: true # freeze gaussian means during coarse
+# TODO: fix this later, only for debugging
+densify_until_iter: 0
+coarse_freeze_xyz: false # freeze gaussian means during coarse
 coarse_frame_idx: ${preprocessing.da3_pc_frame_number} # overfit coarse on the frame we initialize from
 
 # fine (dynamic) stage progressive frame sampling window

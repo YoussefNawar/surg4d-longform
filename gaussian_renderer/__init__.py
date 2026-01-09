@@ -215,7 +215,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     # time3 = get_time()
-    rendered_image, language_feature_image, radii, depth = rasterizer(
+    rendered_image, language_feature_image, radii, depth, alpha, proj_2D, conic_2D, conic_2D_inv, gs_per_pixel, weight_per_gs_pixel, x_mu = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,
@@ -244,7 +244,14 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "visibility_filter" : radii > 0,
             "radii": radii,
             "depth":depth,
-            "coff":coff}
+            "coff":coff,
+            "proj_2D": proj_2D,
+            "conic_2D": conic_2D,
+            "conic_2D_inv": conic_2D_inv,
+            "gs_per_pixel": gs_per_pixel,
+            "weight_per_gs_pixel": weight_per_gs_pixel,
+            "x_mu": x_mu,
+            "alpha": alpha}
 
 def render_opacity(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, opt, scaling_modifier = 1.0, override_color = None, stage='fine-lang', cam_type=None,args=None):
     """
@@ -397,7 +404,7 @@ def render_opacity(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     # time3 = get_time()
-    rendered_image, language_feature_image, radii, depth = rasterizer(
+    rendered_image, language_feature_image, radii, depth, alpha, proj_2D, conic_2D, conic_2D_inv, gs_per_pixel, weight_per_gs_pixel, x_mu = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,
