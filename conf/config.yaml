@@ -1,5 +1,5 @@
 defaults:
-  - clips: final_dataset
+  - clips: final_dataset_mergechallenge
   - preprocessing: qwen3
   - feature_extraction: qwen3
   - autoencoder: qwen3_global
@@ -22,13 +22,13 @@ skip_compute_metrics: false
 cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k
 cholect50_root: data/cholect50
-preprocessed_root: data/preprocessed/qwen3_da3_subsampled
+preprocessed_root: data/preprocessed/qwen3_da3_subsampled_assigncluster
 output_root: output/qwen3_da3_cotracker
 
 whole_pipeline_clips_sequentially: false
 
 config_dumps:
-  - ${output_root}/config.yaml
+  # - ${output_root}/config.yaml
 
 hydra:
   job:
