@@ -1,4 +1,5 @@
-config_path: arguments/cholecseg8k/no_tv.py # this config disables total variation losses
+# config_path: arguments/cholecseg8k/no_tv.py # this config disables total variation losses
+config_path: arguments/cholecseg8k/default.py
 
 depth_loss_weight: 1.0
 opacity_loss_weight: 0.0 # does not make sense without densification
@@ -38,7 +39,7 @@ progressive_window:
 # each stage starts at 0 iterations and the lang stages consider these lists
 # ATTENTION: it's crucial to save the last iteration of fine lang here!
 test_iterations: [100, 10000] # when to compute val metrics (logged to tensorboard)
-save_iterations: [100, 10000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
+save_iterations: [1000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
 checkpoint_iterations: [] # when to save full checkpoints (with optimizer states for resuming)
 
 render_outputs:

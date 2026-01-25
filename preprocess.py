@@ -10,10 +10,6 @@ import shutil
 import sys
 import torch
 from loguru import logger
-from vipe import make_pipeline
-from vipe.streams.base import ProcessedVideoStream
-from vipe.streams.frame_dir_stream import FrameDirStream
-from vipe.utils.io import ArtifactPath
 import zipfile
 from openexr_numpy import imread
 import cv2
@@ -21,10 +17,7 @@ import json
 import re
 from depth_anything_3.api import DepthAnything3
 
-from scripts.vipe_to_colmap_local import convert_vipe_to_colmap
 from cholec_utils import get_clip_seg8k, parse_cholecseg8k_instance_mask
-from vipe.utils.depth import reliable_depth_mask_range
-from vipe.utils.io import read_depth_artifacts
 from da3_utils import da3_to_multi_view_colmap, log_da3_rerun
 from scene.colmap_loader import read_points3D_binary
 from scene.dataset_readers import storePly
@@ -328,163 +321,6 @@ def get_cholecseg8k_frames(clip: DictConfig, cfg: DictConfig):
             json.dump(translated_labels, f, indent=2)
 
 
-def vipe(clip: DictConfig, cfg: DictConfig):
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-    image_dir = clip_dir / "rgb"
-    assert image_dir.exists(), f"RGB frames directory not found: {image_dir}"
-
-    overrides = [
-        "pipeline=" + ("default" if cfg.preprocessing.vipe_vda else "no_vda"),
-        f"pipeline.output.path={str(clip_dir.resolve())}",
-        "pipeline.output.save_artifacts=true",
-        "pipeline.output.save_viz="
-        + ("true" if cfg.preprocessing.vipe_save_viz else "false"),
-        "pipeline.output.save_slam_map="
-        + ("true" if cfg.preprocessing.vipe_slam_map else "false"),
-        "streams=frame_dir_stream",
-        f"streams.base_path={str(image_dir.resolve())}",
-    ]
-
-    local_config_dir = Path(__file__).parent / "submodules" / "vipe" / "configs"
-    with hydra.initialize_config_dir(
-        config_dir=str(local_config_dir.resolve()), version_base=None
-    ):
-        args = hydra.compose("default", overrides=overrides)
-
-    pipeline = make_pipeline(args.pipeline)
-    video_stream = ProcessedVideoStream(FrameDirStream(image_dir), []).cache(
-        desc="Reading image frames"
-    )
-
-    pipeline.run(video_stream)
-
-    # Clean up GPU memory from VIPE pipeline
-    del pipeline
-    del video_stream
-    torch.cuda.empty_cache()
-
-    GlobalHydra.instance().clear()
-
-
-def select_best_frame_for_pointcloud(
-    clip: DictConfig, cfg: DictConfig, artifact
-) -> int | None:
-    """Select the best frame for single depth projection initialization.
-
-    Selects based on:
-    1. (Primary) Number of instances in the instance mask
-    2. (Secondary) Depth range as tie-breaker
-
-    Returns:
-        Frame index to use, or None if should use all frames
-    """
-    if not cfg.preprocessing.vipe_pc_single_depth_projection:
-        return None
-
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-
-    if not cfg.preprocessing.vipe_pc_single_depth_use_instance_count:
-        # Fallback to original depth range only logic
-        print("Selecting frame based on depth range only...")
-        max_range = -1
-        max_range_idx = 0
-
-        for idx, (_, depth) in enumerate(read_depth_artifacts(artifact.depth_path)):
-            if depth is not None:
-                depth_mask = reliable_depth_mask_range(depth).numpy()
-                if depth_mask.sum() > 0:
-                    valid_depths = depth.numpy()[depth_mask]
-                    depth_range = valid_depths.max() - valid_depths.min()
-                    if depth_range > max_range:
-                        max_range = depth_range
-                        max_range_idx = idx
-
-        print(f"Selected frame {max_range_idx} with depth range {max_range:.4f}")
-        return max_range_idx
-
-    # Use instance count as primary criterion
-    print(
-        "Selecting frame based on instance count (primary) and depth range (secondary)..."
-    )
-
-    instance_mask_dir = clip_dir / cfg.preprocessing.instance_mask_subdir
-    if not instance_mask_dir.exists():
-        print(
-            f"Warning: Instance mask directory not found at {instance_mask_dir}, falling back to depth range only"
-        )
-        return select_best_frame_for_pointcloud(
-            clip,
-            cfg.__class__(
-                {
-                    **cfg,
-                    "preprocessing": {
-                        **cfg.preprocessing,
-                        "vipe_pc_single_depth_use_instance_count": False,
-                    },
-                }
-            ),
-            artifact,
-        )
-
-    instance_masks = sorted(
-        list(instance_mask_dir.glob("*.npy")), key=extract_frame_number
-    )
-
-    # Collect metrics for all frames
-    frame_metrics = []
-    for idx, (_, depth) in enumerate(read_depth_artifacts(artifact.depth_path)):
-        if depth is not None:
-            depth_mask = reliable_depth_mask_range(depth).numpy()
-            if depth_mask.sum() > 0:
-                valid_depths = depth.numpy()[depth_mask]
-                depth_range = valid_depths.max() - valid_depths.min()
-
-                # Load corresponding instance mask
-                if idx < len(instance_masks):
-                    instance_mask = np.load(instance_masks[idx])
-                    # Count unique instances (excluding background = 0)
-                    unique_instances = np.unique(instance_mask)
-                    instance_count = len(unique_instances[unique_instances != 0])
-                else:
-                    instance_count = 0
-
-                frame_metrics.append((idx, instance_count, depth_range))
-
-    # Sort by instance count (descending), then by depth range (descending)
-    frame_metrics.sort(key=lambda x: (x[1], x[2]), reverse=True)
-
-    if frame_metrics:
-        selected_idx = frame_metrics[0][0]
-        selected_instance_count = frame_metrics[0][1]
-        selected_depth_range = frame_metrics[0][2]
-        print(
-            f"Selected frame {selected_idx} with {selected_instance_count} instances and depth range {selected_depth_range:.4f}"
-        )
-        return selected_idx
-    else:
-        print("Warning: No valid frames found, falling back to first frame")
-        return 0
-
-
-def vipe_to_colmap(
-    clip: DictConfig,
-    cfg: DictConfig,
-):
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-    artifacts = list(ArtifactPath.glob_artifacts(clip_dir, use_video=True))
-    for artifact in artifacts:
-        # Select the best frame if using single depth projection
-        selected_frame_idx = select_best_frame_for_pointcloud(clip, cfg, artifact)
-
-        convert_vipe_to_colmap(
-            artifact=artifact,
-            output_path=clip_dir,
-            depth_step=cfg.preprocessing.vipe_depth_step,
-            use_slam_map=cfg.preprocessing.vipe_slam_map,
-            single_frame_idx=selected_frame_idx,
-        )
-
-
 def colmap_txt_to_bin(clip: DictConfig, cfg: DictConfig):
     clip_dir = Path(cfg.preprocessed_root) / clip.name
     output_dir = clip_dir / "sparse" / "0"
@@ -500,32 +336,6 @@ def colmap_txt_to_bin(clip: DictConfig, cfg: DictConfig):
         "BIN",
     ]
     subprocess.run(cmd, check=True)
-
-
-def extract_depth_maps(clip: DictConfig, cfg: DictConfig):
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-    depth_dir = clip_dir / "depth"
-    if not cfg.preprocessing.depth_subdir == "depth":
-        shutil.move(depth_dir, clip_dir / cfg.preprocessing.depth_subdir)
-        depth_dir = clip_dir / cfg.preprocessing.depth_subdir
-
-    rgb_zip = depth_dir / "rgb.zip"
-    assert rgb_zip.exists()
-
-    # unzip zip created by vipe
-    with zipfile.ZipFile(rgb_zip, "r") as zip_ref:
-        zip_ref.extractall(depth_dir)
-    rgb_zip.unlink()
-
-    # rename to 6 digit format
-    for exr_file in sorted(depth_dir.glob("*.exr"), key=extract_frame_number):
-        frame_idx = int(exr_file.name[:5])
-        exr_file.rename(exr_file.with_name(f"{frame_idx:06d}.exr"))
-
-    # convert to np array
-    for exr_file in sorted(depth_dir.glob("*.exr"), key=extract_frame_number):
-        depth = imread(str(exr_file), "Z")
-        np.save(exr_file.with_name(f"{exr_file.stem}.npy"), depth)
 
 
 def delete_unused_files(clip: DictConfig, cfg: DictConfig):
@@ -616,6 +426,7 @@ def da3(clip: DictConfig, cfg: DictConfig):
         view_indices=init_frame_indices,
         conf_thresh_percentile=cfg.preprocessing.da3_conf_thresh_percentile,
         pixel_stride=cfg.preprocessing.da3_pc_pixel_stride,
+        densify_ratio=cfg.preprocessing.da3_densify_ratio,
     )
     logger.info(f"Point counts per view: {dict(zip(init_frame_indices, view_point_counts))}")
 
@@ -639,15 +450,6 @@ def da3(clip: DictConfig, cfg: DictConfig):
         confidence_path = confidence_dir / f"{frame_idx:06d}.npy"
         np.save(confidence_path, confidence_orig)
 
-    # visualize to rerun
-    if cfg.preprocessing.da3_visualize:
-        log_da3_rerun(
-            prediction,
-            image_filenames,
-            clip_dir / "da3_viz.rrd",
-            conf_thresh_percentile=cfg.preprocessing.da3_conf_thresh_percentile,
-            subsample_points=10,  # more efficient
-        )
 
     # Clean up GPU memory from da3 model
     del model
@@ -665,12 +467,7 @@ def pc_ply_visualization(clip: DictConfig, cfg: DictConfig):
 
 def process_clip(clip: DictConfig, cfg: DictConfig):
     get_cholecseg8k_frames(clip, cfg)
-    if cfg.preprocessing.depth_estimation == "vipe":
-        vipe(clip, cfg)
-        vipe_to_colmap(clip, cfg)
-        colmap_txt_to_bin(clip, cfg)
-        extract_depth_maps(clip, cfg)
-    elif cfg.preprocessing.depth_estimation == "da3":
+    if cfg.preprocessing.depth_estimation == "da3":
         da3(clip, cfg)
     else:
         raise ValueError(

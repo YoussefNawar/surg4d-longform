@@ -74,18 +74,20 @@ def process_clip_cotracker(clip: DictConfig, cfg: DictConfig):
     
     # Track control points across all frames
     logger.info("Running CoTracker3...")
-    control_points_2d = track_control_points(
+    control_points_2d, visibility = track_control_points(
         image_files,
         grid_size=cfg.preprocessing.cotracker_grid_size,
         save_dir=cotracker_dir,
     )
-    # shape: (T, N_grid, 2) where N_grid = grid_size * grid_size
+    # shape of control points: (T, N_grid, 2) where N_grid = grid_size * grid_size
+    # shape of visibility: (T, N_grid), those are boolean values!
     
     # Lift control points to 3D using DA3 depth and camera parameters
     logger.info("Lifting control points to 3D...")
     colmap_dir = clip_dir / "sparse" / "0"
     control_points_3d, control_point_validity = lift_control_points_to_3d(
         control_points_2d,
+        visibility,
         depth_dir,
         colmap_dir,
         image_files,
@@ -127,6 +129,7 @@ def process_clip_cotracker(clip: DictConfig, cfg: DictConfig):
             instance_masks[init_frame_idx] if instance_masks is not None else None,
             k_neighbors=cfg.splat.cotracker_k_neighbors,
             grid_size=cfg.preprocessing.cotracker_grid_size,
+            idw_power=cfg.splat.cotracker_idw_power,
             pixel_stride=cfg.preprocessing.da3_pc_pixel_stride,
             confidence_dir=confidence_dir,
             conf_thresh_percentile=cfg.preprocessing.da3_conf_thresh_percentile,
@@ -141,7 +144,13 @@ def process_clip_cotracker(clip: DictConfig, cfg: DictConfig):
     # Concatenate associations from all frames
     combined_indices = torch.cat(all_indices, dim=0)  # (N_total, K)
     combined_weights = torch.cat(all_weights, dim=0)  # (N_total, K)
-    
+
+    # Densify associations if needed
+    if cfg.preprocessing.da3_densify_ratio > 1:
+        # This works because torch.repeat behaves like np.tile
+        combined_indices = combined_indices.repeat(cfg.preprocessing.da3_densify_ratio, 1)
+        combined_weights = combined_weights.repeat(cfg.preprocessing.da3_densify_ratio, 1)
+
     total_gaussians = combined_indices.shape[0]
     logger.info(f"Total Gaussians from all frames: {total_gaussians}")
     logger.info(f"Gaussians per frame: {dict(zip(init_frame_indices, gaussians_per_frame))}")

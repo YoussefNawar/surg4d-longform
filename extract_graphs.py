@@ -36,6 +36,7 @@ from rerun_utils import (
     log_graph_structure_through_time,
 )
 
+from utils.gaussian_loading_utils import get_latest_model_iteration
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -150,6 +151,9 @@ def load_gaussian_model(
                 )
         args = merge_hparams(args, config)
 
+    if args.iteration == -1:
+        args.iteration = get_latest_model_iteration(cfg)
+
     # Load model
     hyper = hyperparam.extract(args)
     dataset = model_params.extract(args)
@@ -185,10 +189,12 @@ def filter_gaussians(gaussians: GaussianModel, mask: torch.Tensor):
             if attribute.shape[0] == n_gaussians:
                 setattr(gaussians, prop, attribute[mask])
                 logger.info(f"Filtered {prop} with shape {attribute.shape}")
+                logger.info(f"New shape of {prop}: {getattr(gaussians, prop).shape}")
             # Handle _control_point_positions_precomputed which has shape (T, N, 3)
             elif attribute.ndim == 3 and attribute.shape[1] == n_gaussians:
                 setattr(gaussians, prop, attribute[:, mask, :])
                 logger.info(f"Filtered {prop} along dim 1 with shape {attribute.shape}")
+                logger.info(f"New shape of {prop}: {getattr(gaussians, prop).shape}")
 
 
 def normalize_indep_dim(x):
@@ -227,6 +233,9 @@ def deform_at_timestep(gaussians: GaussianModel, timestep: float):
             device=means3D.device,
             dtype=means3D.dtype,
         )
+
+        # Normalize language feature
+        lang = lang / (lang.norm(dim=-1, keepdim=True) + 1e-9)
 
         # Apply deformation to all Gaussians (same as renderer)
         means3D_final, _, _, _, _, lang_final, _ = gaussians._deformation(
@@ -300,13 +309,16 @@ def cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
     else:
         # pos
         # Doing this for a few timesteps only, tradeoff with runtime
-        deformed_data = [deform_at_timestep(gaussians, t) for t in [0.0, 0.5, 1.0]]
+
+        timesteps = np.linspace(0, 1, cfg.graph_extraction.n_timesteps_filtering, dtype=np.float32)
+        deformed_data = [deform_at_timestep(gaussians, t) for t in timesteps]
+
         pos_through_time = np.concatenate([normalize_dep_dim(i[0]) for i in deformed_data], axis=-1)
         # Only taking the features for the first timestep, assuming they are roughly constant per instance
         instance_features = normalize_dep_dim(deformed_data[0][2])
         clustering_feats = np.concatenate(
             [
-                cfg.graph_extraction.clustering_weights.position * (pos_through_time / 9),
+                cfg.graph_extraction.clustering_weights.position * (pos_through_time / (3 * len(timesteps))),
                 cfg.graph_extraction.clustering_weights.instance * (instance_features / 3),
             ],
             axis=-1,
@@ -632,8 +644,15 @@ def bhattacharyya_coefficient(mu1, Sigma1, mu2, Sigma2):
     mu1, mu2 = np.asarray(mu1), np.asarray(mu2)
     Sigma1, Sigma2 = np.asarray(Sigma1), np.asarray(Sigma2)
 
+    # Regularize covariance matrices to ensure positive definiteness
+    # This handles cases where clusters have few points or collinear points
+    eps = 1e-6
+    dim = Sigma1.shape[0]
+    Sigma1_reg = Sigma1 + eps * np.eye(dim)
+    Sigma2_reg = Sigma2 + eps * np.eye(dim)
+
     # Average covariance
-    Sigma = 0.5 * (Sigma1 + Sigma2)
+    Sigma = 0.5 * (Sigma1_reg + Sigma2_reg)
 
     # Cholesky factorization for stability
     L = np.linalg.cholesky(Sigma)
@@ -645,8 +664,8 @@ def bhattacharyya_coefficient(mu1, Sigma1, mu2, Sigma2):
 
     # log-determinants via Cholesky
     logdet_Sigma = 2.0 * np.sum(np.log(np.diag(L)))
-    logdet_Sigma1 = 2.0 * np.sum(np.log(np.diag(np.linalg.cholesky(Sigma1))))
-    logdet_Sigma2 = 2.0 * np.sum(np.log(np.diag(np.linalg.cholesky(Sigma2))))
+    logdet_Sigma1 = 2.0 * np.sum(np.log(np.diag(np.linalg.cholesky(Sigma1_reg))))
+    logdet_Sigma2 = 2.0 * np.sum(np.log(np.diag(np.linalg.cholesky(Sigma2_reg))))
     term2 = 0.5 * (logdet_Sigma - 0.5 * (logdet_Sigma1 + logdet_Sigma2))
 
     DB = term1 + term2
@@ -860,26 +879,35 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     # Load model
     gaussians, scene, dataset, args, pipeline = load_gaussian_model(clip, cfg)
 
-    # # gaussian filtering before clustering
+    # Optional: gaussian filtering before clustering
     # with torch.no_grad():
-    #     opacity = gaussians.get_opacity.squeeze()  # (N,)
-    #     lang = gaussians.get_language_feature      # (N, D_latent)
-    #     lang_norm = lang.norm(dim=-1)              # (N,)
-    #     relevance = opacity * lang_norm
-    #     mask = relevance >= cfg.graph_extraction.relevance_threshold
-        
-    #     n_kept = mask.sum().item()
-    #     n_total = mask.shape[0]
-    #     logger.info(f"Relevance filtering: {n_kept}/{n_total} Gaussians pass threshold {cfg.graph_extraction.relevance_threshold}")
-    #     logger.info(f"  opacity range: [{opacity.min().item():.4f}, {opacity.max().item():.4f}]")
-    #     logger.info(f"  lang_norm range: [{lang_norm.min().item():.4f}, {lang_norm.max().item():.4f}]")
-    #     logger.info(f"  relevance range: [{relevance.min().item():.4f}, {relevance.max().item():.4f}]")
-        
-    #     if n_kept == 0:
-    #         logger.warning("All Gaussians filtered out! Skipping relevance filtering.")
-    #     else:
-    #         filter_gaussians(gaussians, mask)
+        # opacity = gaussians.get_opacity.squeeze()  # (N,)
+        # lang = gaussians.get_language_feature      # (N, D_latent)
+        # lang_norm = lang.norm(dim=-1)              # (N,)
+        # relevance = opacity * lang_norm
+        # mask = relevance >= cfg.graph_extraction.relevance_threshold
+        # n_kept = mask.sum().item()
+        # n_total = mask.shape[0]
+        # logger.info(f"Relevance filtering: {n_kept}/{n_total} Gaussians pass threshold {cfg.graph_extraction.relevance_threshold}")
+        # logger.info(f"  opacity range: [{opacity.min().item():.4f}, {opacity.max().item():.4f}]")
+        # logger.info(f"  lang_norm range: [{lang_norm.min().item():.4f}, {lang_norm.max().item():.4f}]")
+        # logger.info(f"  relevance range: [{relevance.min().item():.4f}, {relevance.max().item():.4f}]")
+        # if n_kept == 0:
+        #     logger.warning("No Gaussians pass relevance threshold, skipping initial filtering!")
+        # else:
+        #     filter_gaussians(gaussians, mask)
 
+        # # Alternative filtering: Create a random mask, keeping percentage of Gaussians
+        # # TODO: if actually using this, parameter should go into config!
+        # p_gaussians = 0.3
+        # n_gaussians = gaussians._control_point_positions_precomputed.shape[1] # shape is T, N_gaussians, 3
+        # mask = torch.zeros(n_gaussians, dtype=torch.bool)
+        # random_indices = torch.randperm(n_gaussians)[:int(n_gaussians * p_gaussians)]
+        # mask[random_indices] = True
+        # print(f"shape of first mask: {mask.shape}")
+        # filter_gaussians(gaussians, mask)
+
+    logger.info(f"Clustering with {cfg.graph_extraction.cluster_method} method")
     # Cluster, filter clusters, optional mask-based filtering, then drop -1s
     if cfg.graph_extraction.cluster_method == "hdbscan":
         clusters = cluster_gaussians(gaussians, cfg=cfg)
@@ -887,26 +915,31 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         clusters = spectral_cluster_gaussians(gaussians, cfg=cfg)
     else:
         raise ValueError(f"Invalid cluster method: {cfg.graph_extraction.cluster_method}")
-    filter_clusters(clusters, cfg)
+    logger.info(f"Clustered {len(np.unique(clusters))} clusters")
 
-    # Optional: mask-based cluster filtering (coverage or IoU)
-    mf = getattr(cfg.graph_extraction, "mask_filtering", None)
-    if mf and bool(mf.get("enabled", False)):
-        logger.info(
-            "Applying mask-based cluster filtering (%s, threshold=%.3f)",
-            mf.metric,
-            mf.threshold,
-        )
-        clusters = filter_clusters_by_masks(
-            gaussians=gaussians,
-            clusters=clusters,
-            scene=scene,
-            args=args,
-            dataset=dataset,
-            pipe=pipeline,
-            cfg=cfg,
-            clip=clip,
-        )
+    logger.info(f"Filtering clusters...")
+    filter_clusters(clusters, cfg)
+    logger.info(f"Filtered {len(np.unique(clusters))} clusters")
+
+    # # Optional: mask-based cluster filtering (coverage or IoU)
+    # mf = getattr(cfg.graph_extraction, "mask_filtering", None)
+    # if mf and bool(mf.get("enabled", False)):
+    #     logger.info(
+    #         "Applying mask-based cluster filtering (%s, threshold=%.3f)",
+    #         mf.metric,
+    #         mf.threshold,
+    #     )
+    #     clusters = filter_clusters_by_masks(
+    #         gaussians=gaussians,
+    #         clusters=clusters,
+    #         scene=scene,
+    #         args=args,
+    #         dataset=dataset,
+    #         pipe=pipeline,
+    #         cfg=cfg,
+    #         clip=clip,
+    #     )
+
     cluster_mask = clusters >= 0
     filter_gaussians(gaussians, cluster_mask)
     clusters = clusters[cluster_mask]
@@ -919,6 +952,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     lf_patch_through_time = np.stack([i[1] for i in deformed_data])
     lf_instance_through_time = np.stack([i[2] for i in deformed_data])
 
+    logger.info(f"Decoding Qwen features...")
     selected_decoded_lf_through_time = [
         clusterwise_qwen_feats(
             clusters,
@@ -935,6 +969,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         cluster_extent_through_time,
     ) = properties_through_time(pos_through_time, clusters)
 
+    logger.info(f"Building graphs...")
     # Graph
     graph_results = [
         timestep_graph(pos_through_time[i], clusters, cfg)
@@ -942,6 +977,8 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     ]
     graphs = np.stack([g[0] for g in graph_results])
     bhattacharyya_coeffs = np.stack([g[1] for g in graph_results])
+
+    logger.info(f"Saving outputs...")
 
     # Save outputs
     model_path = Path(cfg.output_root) / clip.name
@@ -1015,6 +1052,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     np.save(out / "positions.npy", pos_through_time)  # (T, n_filtered_gaussians, 3)
     np.save(out / "clusters.npy", clusters)  # (n_filtered_gaussians,)
 
+    logger.info(f"Visualizing to rerun...")
     # Visualize to rerun
     rr.init("clusters")
     rr.save(out / "visualization.rrd")  # save to file for offline viewing

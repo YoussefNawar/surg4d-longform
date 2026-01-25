@@ -192,11 +192,12 @@ def track_control_points(
     visualizer = Visualizer(save_dir=save_dir, pad_value=25)
     visualizer.visualize(video= images_torch * 255.0, tracks=tracks, visibility=visibility, filename="cotracker3_visualization")
     
-    return tracks.squeeze(0)
+    return tracks.squeeze(0), visibility.squeeze(0)
 
 
 def lift_control_points_to_3d(
     control_points_2d: torch.Tensor,
+    visibility: torch.Tensor,
     depth_dir: Path,
     colmap_dir: Path,
     image_files: List[Path],
@@ -208,6 +209,7 @@ def lift_control_points_to_3d(
     
     Args:
         control_points_2d: (T, N_grid, 2) 2D pixel coordinates (torch.Tensor on GPU)
+        visibility: (T, N_grid) boolean array indicating visible/occluded tracked points
         depth_dir: Directory containing depth maps (*.npy files)
         colmap_dir: Directory containing sparse/0/ Colmap data with camera parameters
         image_files: List of image file paths (sorted by frame number)
@@ -232,11 +234,13 @@ def lift_control_points_to_3d(
     validity = torch.zeros((T, N_grid), device="cuda", dtype=torch.bool)
     
     logger.info(f"Lifting {N_grid} control points to 3D world coordinates for {T} frames...")
-
-    if save_dir is not None:
-        rr.init("cotracker3_visualization")
-        rr.save(save_dir / "cotracker3_visualization.rrd")
     
+    # Pre-load all depth maps and sample depths for visible points
+    # We'll forward-fill depths for occluded points
+    all_depths = torch.zeros((T, N_grid), device="cuda", dtype=torch.float32)
+    visibility_torch = visibility.to("cuda")  # (T, N_grid)
+    
+    logger.info("Sampling depths for all frames...")
     for t in range(T):
         depth_map = np.load(str(depth_files[t]))  # (H, W)
         depth_map_torch = torch.from_numpy(depth_map).to("cuda")
@@ -248,7 +252,77 @@ def lift_control_points_to_3d(
         # Sample depth at control point locations (nearest neighbor)
         x_coords = torch.clamp(points_2d[:, 0].int(), 0, W - 1)
         y_coords = torch.clamp(points_2d[:, 1].int(), 0, H - 1)
-        depths = depth_map_torch[y_coords, x_coords]  # (N_grid,)
+        depths = depth_map_torch[y_coords, x_coords]  # (N_grid,) yielding depth for each control point
+        
+        # Only use depth if point is visible and depth is valid
+        visible_and_valid = visibility_torch[t] & (depths > 0)
+        all_depths[t] = torch.where(visible_and_valid, depths, 0.0) # if 2d control point is occluded, this will zero out the depth
+    
+    # Forward-fill and backward-fill depths: for each control point, propagate depth from nearest visible frame
+    # Strategy: 
+    #   1. Forward-fill: propagate from past to future (handles points visible early, occluded later)
+    #   2. Backward-fill: propagate from future to past (handles points occluded early, visible later)
+    logger.info("Forward-filling and backward-filling depths for invalid points...")
+    filled_depths = all_depths.clone()  # (T, N_grid) containing depths at each timestep for each control point
+    
+    # Create mask of valid frames (visible AND depth > 0)
+    valid_mask = visibility_torch & (all_depths > 0)  # (T, N_grid)
+    
+    # Forward-fill: for each point, propagate last valid depth forward
+    last_valid_depths = torch.zeros(N_grid, device="cuda", dtype=torch.float32)  # (N_grid,)
+    has_valid_depth_forward = torch.zeros(N_grid, device="cuda", dtype=torch.bool)  # (N_grid,)
+    
+    # Loop to investigate each point across frames, no filling yet
+    for t in range(T):
+        # Update last valid depth for points that are valid at this frame
+        valid_at_t = valid_mask[t]  # (N_grid,)
+        # Receives either its depth if valid or the last valid depth if not valid
+        # Note that the last valid start out at 0 but by updating it this way forward in time, it will eventually contain the last valid depth for each point
+        last_valid_depths = torch.where(valid_at_t, all_depths[t], last_valid_depths)
+        # This is needed to track whether each point has been valid up until timestep t
+        has_valid_depth_forward = has_valid_depth_forward | valid_at_t # element-wise OR operation
+        
+        # For points without valid depth, use last valid depth if available
+        needs_fill = ~valid_at_t  # No valid depth at this frame (N_grid,)
+        filled_depths[t] = torch.where(
+            needs_fill & has_valid_depth_forward,
+            last_valid_depths,
+            filled_depths[t]  # Keep original (valid depth or 0 if never seen valid)
+        )
+    
+    # Backward-fill: for points that still have 0 depth (never had valid depth before current frame),
+    # propagate from the first valid depth in the future
+    next_valid_depths = torch.zeros(N_grid, device="cuda", dtype=torch.float32)  # (N_grid,)
+    has_valid_depth_backward = torch.zeros(N_grid, device="cuda", dtype=torch.bool)  # (N_grid,)
+    
+    for t in range(T - 1, -1, -1):  # Iterate backwards
+        # Update next valid depth for points that are valid at this frame
+        valid_at_t = valid_mask[t]  # (N_grid,)
+        next_valid_depths = torch.where(valid_at_t, all_depths[t], next_valid_depths)
+        has_valid_depth_backward = has_valid_depth_backward | valid_at_t
+        
+        # For points that still have 0 depth after forward-fill, use next valid depth
+        still_needs_fill = filled_depths[t] == 0  # (N_grid,)
+        filled_depths[t] = torch.where(
+            still_needs_fill & has_valid_depth_backward,
+            next_valid_depths,
+            filled_depths[t]
+        )
+    
+    if save_dir is not None:
+        rr.init("cotracker3_visualization")
+        rr.save(save_dir / "cotracker3_visualization.rrd")
+
+    for t in range(T):
+        depth_map = np.load(str(depth_files[t]))  # (H, W) - reload for visualization
+        depth_map_torch = torch.from_numpy(depth_map).to("cuda")
+        H, W = depth_map_torch.shape
+        
+        # Get 2D positions for this frame
+        points_2d = control_points_2d[t]  # (N_grid, 2)
+        
+        # Use filled depths
+        depths = filled_depths[t]  # (N_grid,)
         
         # Mark valid points (non-zero depth)
         valid_mask = depths > 0
@@ -278,8 +352,6 @@ def lift_control_points_to_3d(
         trans = c2w[:3, 3]   # (3,)
         points_world = points_cam @ R.T + trans  # (N_grid, 3)
         
-        print(f"t: {t}, points_world: {points_world[:10, :]}")
-        print(f"type of t: {type(t)}")
         control_points_3d[t] = points_world
         
         # Logging for visualization

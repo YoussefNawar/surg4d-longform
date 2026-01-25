@@ -153,15 +153,13 @@ def render_set(
                 gt_nonorm_list.append(gt)
                 if data_type != "dynerf" or name != "video":
                     gt = (gt + 1.0) / 2
-            rendering = (rendering + 1.0) / 2
             if rendering.shape[0] > 3:
-                rendering = pca_compress(rendering)
-                rendering = rendering.permute(2, 0, 1)
+                # Rendering and comparing instance features
+                rendering = rendering[-3:, :, :]
                 if ONLY_EVAL == "t":
                     gt = None
                 else:
-                    gt = pca_compress(gt)
-                    gt = gt.permute(2, 0, 1)
+                    gt = gt[-3:, :, :]
         gt_list.append(gt)
         tosave_images_rendering.append(rendering)
         render_images.append(to8b(rendering).transpose(1, 2, 0))

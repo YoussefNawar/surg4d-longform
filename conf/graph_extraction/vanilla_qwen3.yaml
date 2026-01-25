@@ -61,6 +61,7 @@ min_features_per_cluster: 4
 decode_batch_size: 1024
 
 # graph
+n_timesteps_filtering: 3
 n_timesteps: 20
 graph_edge_threshold: 0.05 # edge if bhattacharyya coefficient >= threshold
 

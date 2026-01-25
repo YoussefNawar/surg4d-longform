@@ -17,6 +17,7 @@ def da3_to_multi_view_colmap(
     conf_thresh_percentile: float = 40.0,
     process_res_method: str = "upper_bound_resize",
     pixel_stride: int = 1,
+    densify_ratio: int = 1,
 ):
     """
     Export COLMAP format with points from multiple views (e.g., first, middle, last).
@@ -30,6 +31,7 @@ def da3_to_multi_view_colmap(
         view_indices: List of frame indices to use for point cloud (e.g., [0, T//2, T-1])
         conf_thresh_percentile: Confidence threshold percentile for filtering
         pixel_stride: Stride for subsampling pixels (e.g., 3 = every 3rd pixel = 1/9 points)
+        densify_ratio: Densification ratio for point cloud (1 = no densification, 5 = 5x more points, ...)
     """
     # 1. Data preparation - process each selected view
     conf_thresh = np.percentile(prediction.conf, conf_thresh_percentile)
@@ -42,6 +44,10 @@ def da3_to_multi_view_colmap(
     all_colors = []
     all_points_xyf = []  # For 2D observations
     view_point_counts = []  # Track how many points come from each view
+
+    # Write colored point clouds to rerun
+    rr.init("depth_anything_3_visualization")
+    rr.save(export_dir / "da3_viz.rrd")
 
     for view_idx in view_indices:
         # Extract this view's data
@@ -73,6 +79,37 @@ def da3_to_multi_view_colmap(
             view_conf,
             conf_thresh,
         )
+
+        rr.set_time_sequence("frame", view_idx)
+
+        rr.log("world/original_points", rr.Points3D(
+            positions=points,
+            colors=colors,
+            radii=0.001,
+        ))
+
+        num_points_init = len(points)
+        num_points_to_add = num_points_init * (densify_ratio - 1)
+        print(f"adding {num_points_to_add} points (densify_ratio={densify_ratio})")
+        # TODO: this is fine for now but should be dependent on scene extent!
+        random_noise = np.random.randn(num_points_to_add, 3) * 0.01
+        # Tile copies blockwise, so [p0, p1, p2] -> [p0, p1, p2, p0, p1, p2, ...]
+        random_points = np.tile(points, (densify_ratio - 1, 1)) + random_noise
+        additional_colors = np.tile(colors, (densify_ratio - 1, 1))
+        rr.log("world/additional_points", rr.Points3D(
+            positions=random_points,
+            colors=additional_colors,
+            radii=0.001,
+        ))
+
+        points = np.concatenate([points, random_points], axis=0)
+        colors = np.tile(colors, (densify_ratio, 1))
+
+        rr.log("world/final_points", rr.Points3D(
+            positions=points,
+            colors=colors,
+            radii=0.001,
+        ))
         
         # Get the actual height and width after subsampling
         h_subsampled, w_subsampled = view_depth.shape[1:3]
@@ -86,6 +123,10 @@ def da3_to_multi_view_colmap(
             & (view_depth.reshape(-1) > 0)
         )
         points_xyf = points_xyf[valid_mask]
+
+        # Duplicate xyf to match densified points
+        # TODO: this might become problematic if noisy points are mapping to different pixels
+        points_xyf = np.tile(points_xyf, (densify_ratio, 1))
 
         all_points.append(points)
         all_colors.append(colors)

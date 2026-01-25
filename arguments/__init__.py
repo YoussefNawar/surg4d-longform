@@ -55,7 +55,8 @@ class ModelParams(ParamGroup):
         self._white_background = True
         self._feature_level = -1
         self.data_device = "cuda"
-        self.eval = True
+        # If this is true, COLMAP will hold out views as test set, not desirable atm
+        self.eval = False
         self.render_process=False
         self.add_points=False
         self.extension=".png"

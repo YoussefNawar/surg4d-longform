@@ -286,6 +286,11 @@ def scene_reconstruction(
     # Cache previous batch renders for flow computation when batch_size == 1
     # This allows computing flow between different cameras across iterations
     previous_batch_renders = None
+
+    # Consistent indices for logging
+    num_gaussians = gaussians.get_xyz.shape[0]
+    print(f"#gaussians: {num_gaussians}")
+    sample_indices = torch.randperm(num_gaussians, device=gaussians.get_xyz.device)[:num_gaussians // 4]
     
     for iteration in range(first_iter, final_iter + 1):
         # seed_everything(6666)
@@ -438,7 +443,6 @@ def scene_reconstruction(
         language_feature_masks = []
         coff_list = []
         depth_maps = []
-        opacity_maps = []
         gt_depth_maps = []
 
         # Collect all renders and gt_images first (needed for pairwise flow computation)
@@ -497,18 +501,6 @@ def scene_reconstruction(
             )
             gt_depth_maps.append(gt_depth_map.unsqueeze(0))
 
-            opacity_map = render_opacity(
-                viewpoint_cam,
-                gaussians,
-                pipe,
-                background,
-                opt,
-                stage=stage,
-                cam_type=scene.dataset_type,
-                args=args,
-            )
-            opacity_maps.append(opacity_map)
-
             if "base" not in stage:
                 gt_language_feature, language_feature_mask = (
                     viewpoint_cam.get_language_feature(
@@ -537,7 +529,6 @@ def scene_reconstruction(
             gt_language_feature_tensor = torch.cat(gt_language_features, 0)
         depth_map_tensor = torch.cat(depth_maps, 0)  # (batch, 1, h, w)
         gt_depth_map_tensor = torch.cat(gt_depth_maps, 0)
-        opacity_map_tensor = torch.stack(opacity_maps, 0)
 
         image_tensor = torch.cat(images, 0)
         gt_image_tensor = torch.cat(gt_images, 0)
@@ -545,38 +536,40 @@ def scene_reconstruction(
         # breakpoint()
         # print(dataset.lf_path)
         resdict = {}
+        # Image-based stage
         if "base" in stage:
             Ll1 = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
             resdict["rgb_l1"] = Ll1.item()
-            print(f"rgb_l1: {Ll1.item()}")
+
+            if args.depth_loss_weight != 0.0:
+                depth_loss = l1_loss(depth_map_tensor, gt_depth_map_tensor)
+                resdict["depth_l1"] = depth_loss.item()
+                Ll1 += args.depth_loss_weight * depth_loss
+        # Language feature stage
         else:
             Ll1 = args.lam * l1_loss(
                 language_feature_tensor * language_feature_mask_tensor,
                 gt_language_feature_tensor * language_feature_mask_tensor,
             )
             resdict["lang_l1"] = Ll1.item()
-            if os.getenv("addcosloss", "f") == "t":
-                cosloss = cos_loss(
-                    language_feature_tensor * language_feature_mask_tensor,
-                    gt_language_feature_tensor * language_feature_mask_tensor,
-                )
-                Ll1 += args.beta * cosloss
-                resdict["lang_l1"] = cosloss.item()
+
+            # if os.getenv("addcosloss", "f") == "t":
+            # # TODO: compare L1 and cos and make sure to put in configs
+            # Ll1 = 0.0
+            # # TODO: experiment with what this masking does?
+            # language_feature_mask_tensor = torch.ones_like(language_feature_mask_tensor)
+            # cosloss = cos_loss(
+            #     language_feature_tensor * language_feature_mask_tensor,
+            #     gt_language_feature_tensor * language_feature_mask_tensor,
+            # )
+            # print(f"weighted cosloss: {args.beta * cosloss.item()} with beta {args.beta}")
+            # Ll1 += args.beta * cosloss
+            # resdict["lang_l1"] = cosloss.item()
+
             if joint_train:
                 Ll1_rgb = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
                 resdict["rgb_l1"] = Ll1_rgb.item()
                 Ll1 += Ll1_rgb
-        if args.depth_loss_weight != 0.0:
-            depth_loss = l1_loss(
-                depth_map_tensor, gt_depth_map_tensor
-            )  # changed this to try L2 loss on depth
-            resdict["depth_l1"] = depth_loss.item()
-            print(f"weighted depth_loss: {args.depth_loss_weight * depth_loss.item()}")
-            Ll1 += args.depth_loss_weight * depth_loss
-        if args.opacity_loss_weight != 0.0:
-            opacity_loss = l1_loss(opacity_map_tensor, 1)
-            resdict["opacity_l1"] = opacity_loss.item()
-            Ll1 += args.opacity_loss_weight * opacity_loss
         
         # Flow loss: pairwise computation within batch or with previous batch (only in fine stages)
         flow_losses = []
@@ -722,7 +715,7 @@ def scene_reconstruction(
 
             #
             concatenated_image.save(
-                os.path.join(save_path, f"output_{stage}_{iteration}.png")
+                os.path.join(save_path, f"output_{stage}_{iteration}_{viewpoint_cam.colmap_id}.png")
             )
             if os.getenv("wandb", "f") == "t":
                 wandb.log({"training images": wandb.Image(concatenated_image)})
@@ -807,10 +800,6 @@ def scene_reconstruction(
                     shs = gaussians.get_features
                     language_feature = gaussians.get_language_feature
                     
-                    # Sample indices (shared for both)
-                    num_gaussians = means3D.shape[0]
-                    sample_indices = torch.randperm(num_gaussians, device=means3D.device)[:num_gaussians // 4]
-                    
                     # Get colors from base SH DC component (shared)
                     sampled_shs = shs[sample_indices, 0, :].detach().cpu().numpy()
                     sampled_colors_rgb = (sampled_shs * 0.28209479177387814 + 0.5).clip(0, 1)
@@ -852,27 +841,14 @@ def scene_reconstruction(
                         frame_idx = int(time_tensor[0, 0].item() * (gaussians._num_frames - 1))
                         precomputed_positions = gaussians._control_point_positions_precomputed[frame_idx]
                         
-                        # Filter sample_indices to only include control-point-driven Gaussians
-                        control_point_driven_mask = gaussians._is_control_point_driven
-                        control_sample_mask = control_point_driven_mask[sample_indices]
-                        control_sample_indices = sample_indices[control_sample_mask]
-
-                        # Pick only 10% of these after random permutation
-                        control_sample_indices = control_sample_indices[torch.randperm(len(control_sample_indices))[:int(len(control_sample_indices) * 0.75)]]
-                        control_sample_colors = (shs[control_sample_indices, 0, :].detach().cpu().numpy() * 0.28209479177387814 + 0.5).clip(0, 1)
-
-                        
-                        # Since _is_control_point_driven marks the first n_control_driven Gaussians as True,
-                        # and precomputed_positions contains positions for those Gaussians in the same order,
-                        # the indices directly correspond (control_sample_indices are already the correct indices)
-                        if len(control_sample_indices) > 0:
-                            sampled_precomputed_positions = precomputed_positions[control_sample_indices].detach().cpu().numpy()
+                        if len(sample_indices) > 0:
+                            sampled_precomputed_positions = precomputed_positions[sample_indices].detach().cpu().numpy()
                             rr.log(
                                 "world/gaussians_precomputed",
                                 rr.Points3D(
                                     positions=sampled_precomputed_positions,
                                     # Use the colors of the control point driven Gaussians
-                                    colors=control_sample_colors,
+                                    colors=sampled_colors_uint8,
                                     radii=0.003,
                                 ),
                             )
@@ -959,20 +935,21 @@ def scene_reconstruction(
                     or (iteration < 3000 and iteration % 50 == 49)
                     or (iteration < 60000 and iteration % 100 == 99)
                 ):
-                    render_training_image(
-                        scene,
-                        gaussians,
-                        [test_cams[iteration % len(test_cams)]],
-                        render,
-                        pipe,
-                        background,
-                        opt,
-                        stage + "test",
-                        iteration,
-                        timer.get_elapsed_time(),
-                        scene.dataset_type,
-                        args,
-                    )
+                    if len(test_cams) > 0:
+                        render_training_image(
+                            scene,
+                            gaussians,
+                            [test_cams[iteration % len(test_cams)]],
+                            render,
+                            pipe,
+                            background,
+                            opt,
+                            stage + "test",
+                            iteration,
+                            timer.get_elapsed_time(),
+                            scene.dataset_type,
+                            args,
+                        )
                     render_training_image(
                         scene,
                         gaussians,
@@ -1287,10 +1264,14 @@ def training_report(
         validation_configs = (
             {
                 "name": "test",
-                "cameras": [
-                    scene.getTestCameras()[idx % len(scene.getTestCameras())]
-                    for idx in range(10, 5000, 299)
-                ],
+                "cameras": (
+                    []
+                    if len(scene.getTestCameras()) == 0
+                    else [
+                        scene.getTestCameras()[idx % len(scene.getTestCameras())]
+                        for idx in range(10, 5000, 299)
+                    ]
+                ),
             },
             {
                 "name": "train",

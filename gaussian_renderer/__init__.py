@@ -212,8 +212,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # time2 = get_time()
     # print("asset value:",time2-time1)
     scales_final = pc.scaling_activation(scales_final)
-    # TODO: make this part of config later if still needed
-    scales_final = torch.clamp(scales_final, max=0.005)
     rotations_final = pc.rotation_activation(rotations_final)
     opacity = pc.opacity_activation(opacity_final)
     # print(opacity.max())
@@ -240,7 +238,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     # time3 = get_time()
-    rendered_image, language_feature_image, radii, depth, alpha, proj_2D, conic_2D, conic_2D_inv, gs_per_pixel, weight_per_gs_pixel, x_mu = rasterizer(
+    rendered_image, language_feature_image, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,
@@ -270,14 +268,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "radii": radii,
             "depth":depth,
             "coff":coff,
-            "proj_2D": proj_2D,
-            "conic_2D": conic_2D,
-            "conic_2D_inv": conic_2D_inv,
-            "gs_per_pixel": gs_per_pixel,
-            "weight_per_gs_pixel": weight_per_gs_pixel,
-            "x_mu": x_mu,
-            "alpha": alpha}
+            }
 
+# TODO: remove?
 def render_opacity(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, opt, scaling_modifier = 1.0, override_color = None, stage='fine-lang', cam_type=None,args=None):
     """
     Render the scene. 
@@ -429,7 +422,7 @@ def render_opacity(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     # time3 = get_time()
-    rendered_image, language_feature_image, radii, depth, alpha, proj_2D, conic_2D, conic_2D_inv, gs_per_pixel, weight_per_gs_pixel, x_mu = rasterizer(
+    rendered_image, language_feature_image, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = shs_final,

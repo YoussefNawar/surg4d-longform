@@ -15,6 +15,8 @@ from utils.params_utils import merge_hparams
 from train import training
 from render import render_sets
 
+from utils.gaussian_loading_utils import get_latest_model_iteration
+
 
 def train_splat(clip: DictConfig, cfg: DictConfig):
     """Train Gaussian Splatting for a single clip."""
@@ -307,6 +309,9 @@ def render_splat(clip: DictConfig, cfg: DictConfig, model_path: str, stage: str)
         args.no_dshs = not cfg.splat.dynamic_color
         args.no_ds = not cfg.splat.dynamic_scale
         args.rezero_init = cfg.splat.rezero_init
+
+        if args.iteration == -1:
+            args.iteration = get_latest_model_iteration(cfg)
 
         # Call render function
         render_sets(
