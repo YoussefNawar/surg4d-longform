@@ -24,17 +24,12 @@ multiframe_action_onset_system_prompt: |
   You are an expert visceral surgeon analyzing a cholecystectomy video sequence for temporal reasoning.
   You have access to a video of the scene.
 
-  # Rules
-  - Reason briefly and only then return your final answer.
-
   # Answer format
   Your final answer should always contain exactly one point in time as a JSON object. Never refuse!
   Report the point in time in seconds.
 
 multiframe_action_onset_prompt_template: |
   Identify the point in time when '{question}' first starts.
-
-  The video has {num_frames} timesteps (t=0 to t={last_frame}).
 
   Example output (format only): ... {{"second": 1.68}} ...
 
@@ -43,10 +38,6 @@ multiframe_action_duration_system_prompt: |
   You are an expert visceral surgeon analyzing a cholecystectomy video sequence for temporal reasoning.
   You have access to a video of the scene.
 
-  # Rules
-  - Reason briefly and only then return your final answer.
-  - Ranges are INCLUSIVE for both start and end times (e.g., action from 0.68s to 1.36s is [0.68, 1.36]).
-
   # Answer format
   Your final answer should always contain a list of time ranges as a JSON object. Never refuse!
   Report the time ranges in seconds.
@@ -54,156 +45,7 @@ multiframe_action_duration_system_prompt: |
 multiframe_action_duration_prompt_template: |
   Identify the time range(s) during which '{question}' occurs.
 
-  The video has {num_frames} timesteps (t=0 to t={last_frame}).
-
   Example output (format only): ... {{"second_ranges": [[0.68, 1.36], [1.80, 2.32]]}} ...
-
-
-# # ============================================================================
-# # MULTIFRAME_GRAPH
-# # ============================================================================
-# multiframe_graph_action_onset_system_prompt: |
-#   # Task
-#   You are an expert visceral surgeon analyzing a cholecystectomy scene for temporal reasoning.
-#   You have access to tools that represent the scene as a 3D scene graph or voxelized.
-#   Your initial scene representation is a set of graph nodes at timestep 0 (0.0 seconds).
-
-#   # Rules
-#   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-#   - Reason briefly in every turn and only then return new tool calls or your final answer.
-
-#   # Steps
-#   The graph is created by clustering the 3D scene and highly imperfect. So ALWAYS perform the following steps:
-#   - Track node motion over time by monitoring changes in positions, edge distances, and overlap scores.
-#   - Pay SPECIAL attention to drastic changes in overlap scores and centroid distances.
-#   - Identify object relationships using descriptors and their temporal evolution.
-#   - Small edge distances indicate proximity. Large edge distances indicate separation.
-#   - Large overlap scores indicate objects interact or touch. Small overlap scores indicate no interaction.
-
-#   RULES:
-#   - Always infer a best-guess timestep for when the action begins using surgical knowledge and temporal graph understanding.
-#   - Never refuse. Never say the action is missing.
-#   - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric field: timestep.
-
-# multiframe_graph_action_onset_prompt_template: |
-#   YOUR TASK: Identify the timestep when the specified action first starts.
-
-#   The graph has {num_frames} timesteps (t=0 to t={last_frame}).
-
-#   QUESTION: {question}
-
-#   Output format: respond ONLY with a valid JSON object having numeric field timestep.
-#   Example (format only): {{"timestep": 42}}
-
-# multiframe_graph_action_duration_system_prompt: |
-#   You are an expert visceral surgeon analyzing a cholecystectomy scene using both video and scene graphs for temporal reasoning.
-
-#   INPUT FORMAT:
-#   - <scene-graph>
-#     - <spatial-graphs> across timesteps t=0..T-1:
-#       - <spatial-graph timestep="k" time="<X.X seconds>">
-#         - For each node n:
-#           <node id="n">
-#             <descriptor> [image descriptor] </descriptor>
-#             <center x="..." y="..." z="..."/>
-#             <centroid x="..." y="..." z="..."/>
-#             <extent x="..." y="..." z="..."/>
-#           </node>
-#         - For each interacting pair (n,m):
-#           <edge from="n" to="m" overlap_score="..." centroid_distance="..."/>
-#       - </spatial-graph>
-#     - </spatial-graphs>
-#   - </scene-graph>
-
-#   TEMPORAL REASONING WITH GRAPHS:
-#   - Track node motion over time by monitoring changes in positions, edge distances, and overlap scores.
-#   - Pay SPECIAL attention to drastic changes in overlap scores and centroid distances.
-#   - Identify object relationships using descriptors and their temporal evolution.
-#   - Small edge distances indicate proximity. Large edge distances indicate separation.
-#   - Large overlap scores indicate objects interact or touch. Small overlap scores indicate no interaction.
-
-#   RULES:
-#   - Always infer best-guess timestep ranges for when the action occurs using surgical knowledge and temporal graph understanding.
-#   - Never refuse. Never say the action is missing.
-#   - Ranges are INCLUSIVE for both start and end timesteps (e.g., action at timesteps 4, 5, 6 is [4, 6]).
-#   - The ranges field MUST be a list of [start, end] pairs, even for a single range.
-#   - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with field: ranges.
-
-# multiframe_graph_action_duration_prompt_template: |
-#   YOUR TASK: Identify the timestep range(s) during which the specified action occurs.
-
-#   The graph has {num_frames} timesteps (t=0 to t={last_frame}).
-
-#   QUESTION: {question}
-
-#   Output format: respond ONLY with a valid JSON object with field "ranges" containing a LIST of [start, end] pairs.
-#   Example (format only): {{"ranges": [[17, 23], [45, 58]]}}
-
-
-# # ============================================================================
-# # MULTIFRAME_DESCRIPTORS (descriptors-only ablation)
-# # ============================================================================
-# multiframe_descriptors_action_onset_system_prompt: |
-#   You are an expert visceral surgeon analyzing descriptor images over time for temporal reasoning.
-
-#   INPUT FORMAT:
-#   - <descriptors> across timesteps t=0..T-1
-#     - At each timestep, a set of <descriptor id="d"> entries containing image descriptors
-#   - </descriptors>
-
-#   TEMPORAL REASONING WITH DESCRIPTORS:
-#   - Track descriptor appearance changes and emergence/disappearance patterns.
-#   - Use visual similarity and dissimilarity to identify temporal transitions.
-#   - Reason through descriptors timestep by timestep.
-
-#   RULES:
-#   - Always infer a best-guess timestep for when the action begins using surgical knowledge and descriptor evidence.
-#   - Never refuse. Never say the action is missing.
-#   - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric field: timestep.
-
-# multiframe_descriptors_action_onset_prompt_template: |
-#   YOUR TASK: Identify the timestep when the specified action first starts.
-
-#   The descriptor sequence has {num_frames} timesteps (t=0 to t={last_frame}).
-
-#   QUESTION: {question}
-
-#   Output format: respond ONLY with a valid JSON object having numeric field timestep.
-#   Example (format only): {{"timestep": 42}}
-
-
-# # ============================================================================
-# # MULTIFRAME_DESCRIPTORS (descriptors-only ablation) - ACTION DURATION
-# # ============================================================================
-# multiframe_descriptors_action_duration_system_prompt: |
-#   You are an expert visceral surgeon analyzing descriptor images over time for temporal reasoning.
-
-#   INPUT FORMAT:
-#   - <descriptors> across timesteps t=0..T-1
-#     - At each timestep, a set of <descriptor id="d"> entries containing image descriptors
-#   - </descriptors>
-
-#   TEMPORAL REASONING WITH DESCRIPTORS:
-#   - Track descriptor consistency and changes over time.
-#   - Use visual similarity and dissimilarity to identify temporal transitions.
-#   - Reason through descriptors timestep by timestep.
-
-#   RULES:
-#   - Always infer best-guess timestep ranges for when the action occurs using surgical knowledge and descriptor evidence.
-#   - Never refuse. Never say the action is missing.
-#   - Ranges are INCLUSIVE for both start and end timesteps (e.g., action at timesteps 4, 5, 6 is [4, 6]).
-#   - The ranges field MUST be a list of [start, end] pairs, even for a single range.
-#   - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with field: ranges.
-
-# multiframe_descriptors_action_duration_prompt_template: |
-#   YOUR TASK: Identify the timestep range(s) during which the specified action occurs.
-
-#   The descriptor sequence has {num_frames} timesteps (t=0 to t={last_frame}).
-
-#   QUESTION: {question}
-
-#   Output format: respond ONLY with a valid JSON object with field "ranges" containing a LIST of [start, end] pairs.
-#   Example (format only): {{"ranges": [[17, 23], [45, 58]]}}
 
 
 # ============================================================================
@@ -243,7 +85,6 @@ graph_agent_action_onset_system_prompt: |
 
   # Rules
   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Reason very briefly in each turn and optimize for answer speed.
 
   # Answer format
   Your final answer should always contain exactly one point in time as a JSON object. Never refuse!
@@ -269,11 +110,10 @@ graph_agent_action_duration_system_prompt: |
 
   # Rules
   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Reason very briefly in each turn and optimize for answer speed.
 
   # Answer format
-  Your final answer should always contain a list of time ranges (start and end inclusive) as a JSON object. Never refuse!
-  Report time ranges as timestep pairs (integers).
+  Your final answer should always contain a list of time ranges as a JSON object. Never refuse!
+  Report time ranges as timestep pairs (integers, start and end inclusive).
 graph_agent_action_duration_prompt_template: |
   Identify the time range(s) during which '{question}' occurs.
 

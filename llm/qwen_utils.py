@@ -199,6 +199,7 @@ def get_patched_qwen3(
     Parameters allow enabling weight quantization and optimized attention without editing Transformers.
     """
     model_path = "Qwen/Qwen3-VL-8B-Thinking"
+    # model_path = "Qwen/Qwen3-VL-32B-Thinking"
 
     quantization_config = None
     if use_bnb_4bit:
