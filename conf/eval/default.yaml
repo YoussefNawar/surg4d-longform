@@ -1,13 +1,8 @@
 defaults:
-  # - triplets: default
+  - triplets: null
   - temporal: default
   - spatial: default
   - _self_
-
-# nulling skips - comment out to enable
-triplets: null
-# temporal: null
-# spatial: null
 
 # Qwen version for evaluation (should match feature_extraction.qwen_version)
 qwen_version: ${feature_extraction.qwen_version}
@@ -20,7 +15,7 @@ use_bnb_4bit: false
 use_bnb_8bit: false
 
 # Required output directory for benchmark results
-output_dir: ${output_root}/predictions_seconds
+output_dir: ${output_root}/predictions_testtooltrace
 
 # Optional output override for benchmark results
 output: null

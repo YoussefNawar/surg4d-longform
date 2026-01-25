@@ -1,79 +1,33 @@
-colormap: "jet"
 gt_filename: ${preprocessing.spatial_labels_output_filename}
 output_dir: ${eval.output_dir}/spatial
 dump_visualizations: true
 visualizations_dir: ${eval.output_dir}/spatial_viz
+
+# Tool visualization (null to disable, directory path to enable)
+tool_viz_dir: ${eval.output_dir}/tool_viz/spatial
 
 layers: [0, 1, 2, 12, 16, 20, 24, 28, 31] # 0 to 31
 top_k_scores: 50 # for attn based methods wo/ refinement
 
 # which methods to run (subset of: splat, static_graph, frame_attn, splat_graph, frame_attn_refine, frame_direct, graph_agent)
 methods:
-  # - splat
-  # - static_graph
   # - frame_attn
-  # - splat_graph
   - frame_attn_refine
   - frame_direct
   - graph_agent
 
 
-# # splat: attention scores over all gaussians
-# # NOTE: these are also used for attn extraction in splat_graph
-# splat_system_prompt: |
-#   You are an expert surgical assistant. Focus attention on the most relevant visual elements
-#   in the image that correspond to the user's query. No explanations are needed.
-# splat_prompt_template: "Locate {substring} in the scene."
+# ============================================================================
+# FRAME_ATTN (attention scores over frame patches)
+# ============================================================================
+frame_attn_system_prompt: |
+  You are an expert surgical assistant. Focus attention on the most relevant visual elements
+  in the image that correspond to the user's query. No explanations are needed.
+frame_attn_prompt_template: "Locate {substring} in the scene."
 
-# # static graph: just ask the static graph
-# static_graph_system_prompt: |
-#   You are an expert visceral surgeon analyzing a cholecystectomy scene using a scene graph.
-
-#   INPUT FORMAT:
-#   - <scene-graph>
-#     - <spatial-graphs> across timesteps t=0..T-1:
-#       - <spatial-graph timestep="k">
-#         - For each node n:
-#           <node id="n">
-#             <descriptor> [image descriptor] </descriptor>
-#             <center x="..." y="..." z="..."/>
-#             <centroid x="..." y="..." z="..."/>
-#             <extent x="..." y="..." z="..."/>
-#           </node>
-#         - For each interacting pair (n,m):
-#           <edge from="n" to="m" overlap_score="..." centroid_distance="..."/>
-#       - </spatial-graph>
-#     - </spatial-graphs>
-#   - </scene-graph>
-
-#   SPATIAL REASONING WITH GRAPHS:
-#   Use the graph to infer the 3D location of the queried concept:
-#   - Pay attention to node centroids and extents to infer the 3D location of objects present in the scene.
-#   - You can find distances between objects by looking at the centroid distance properties of graph edges.
-#   - Large overlap scores indicate that objects interact or touch. Small overlap scores indicate that objects do not interact or touch.
-
-#   You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y, z.
-
-#   RULES:
-#   - Always infer a best-guess 3D location for the queried concept using surgical knowledge, synonyms, and spatial understanding of the provided objects, relationships, and extents.
-#   - Never refuse. Never say the concept is missing. Never return an empty object.
-#   - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y, z.
-#   - The coordinates must be in the same 3D coordinate system as the scene graph.
-# static_graph_prompt_template: |
-#   YOUR TASK: Identify the 3D location of the queried concept.
-
-#   QUERY CONCEPT: '{substring}'
-
-#   Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
-#   Example (format only): {{"x": 0.12, "y": -0.08, "z": 0.95}}
-
-# # frame_attn: attention scores over frame patches
-# frame_attn_system_prompt: |
-#   You are an expert surgical assistant. Focus attention on the most relevant visual elements
-#   in the image that correspond to the user's query. No explanations are needed.
-# frame_attn_prompt_template: "Locate {substring} in the scene."
-
-# frame attn refine: 2d attention score proposal, final pixel guess by qwen
+# ============================================================================
+# FRAME_ATTN_REFINE (2D attention score proposal, final pixel guess by qwen)
+# ============================================================================
 frame_attn_refine_attn_layer: 20
 frame_attn_refine_include_scores_in_context: false
 frame_attn_refine_max_proposals: 10
@@ -81,9 +35,6 @@ frame_attn_refine_system_prompt: |
   # Task
   You are an expert visceral surgeon locating objects or actions in a cholecystectomy scene.
   You have access to an image of the scene and pixel coordinate proposals extracted from attention scores.
-
-  # Rules
-  - Reason briefly first and only then return your final answer.
 
   # Answer format
   Your final answer should always contain exactly one 2D point as a JSON object. Never refuse!
@@ -93,14 +44,13 @@ frame_attn_refine_prompt_template: |
 
   Example output (format only): ... {{"x": 112.0, "y": 256.0}} ...
 
-# frame direct: directly ask qwen to return a pixel on the image
+# ============================================================================
+# FRAME_DIRECT (directly ask qwen to return a pixel on the image)
+# ============================================================================
 frame_direct_system_prompt: |
   # Task
   You are an expert visceral surgeon locating objects or actions in a cholecystectomy scene.
   You have access to an image of the scene.
-
-  # Rules
-  - Reason briefly and only then return your final answer.
 
   # Answer format
   Your final answer should always contain exactly one 2D point as a JSON object. Never refuse!
@@ -110,10 +60,14 @@ frame_direct_prompt_template: |
 
   Example output (format only): ... {{"x": 112.0, "y": 256.0}} ...
 
-# graph agent: agentic graph prompting with tools (requires qwen3)
+# ============================================================================
+# GRAPH_AGENT (agentic exploration with tools)
+# ============================================================================
 graph_agent_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
 graph_agent_autoencoder_full_dim: ${autoencoder.full_dim}
 graph_agent_autoencoder_latent_dim: ${autoencoder.latent_dim}
+graph_agent_use_global_autoencoder: ${autoencoder.global_mode}
+graph_agent_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
 graph_agent_max_iterations: 20
 graph_agent_tools:
   - name: node_overlap_position_at_time
@@ -126,69 +80,21 @@ graph_agent_system_prompt: |
   # Task
   You are an expert visceral surgeon locating objects or actions in a cholecystectomy scene.
   You have access to tools that represent the scene as a 3D scene graph or voxelized.
-  Your initial scene representation is a set of graph nodes from the timestep referenced by the query.
+  Your initial scene representation is a set of graph nodes at the relevant timestep.
+
+  # Scene representation
+  - Coordinate system:
+    - increase in x means movement to the right
+    - increase in y means movement to the bottom
+    - increase in z means movement away from the camera
 
   # Rules
-  - Only ever consider the scene at the timestep referenced by the query.
   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Reason briefly in every turn and only then return new tool calls or your final answer.
-
-  # Steps
-  The graph is created by clustering the 3D scene and highly imperfect. So ALWAYS perform the following steps:
-  - Step 1: Determine the location based on the initial graph nodes and graph tools (`node_overlap_position_at_time` and `inspect_highres_node_at_time`).
-  - Step 2: Determine the location based on multiple calls to the `voxelize_scene` tool. (Call this tool on the whole scene first and then refine the resolution by querying relevant subregions of the scene with higher resolution.)
-  - Step 3: If graph-based results and voxelization-based results disagree, trust the voxelization-based results.
 
   # Answer format
   Your final answer should always contain exactly one 3D point as a JSON object. Never refuse!
-  Report the point in the same 3D coordinate system as the scene graph.
+  Report the point in the graph's 3D coordinate system.
 graph_agent_prompt_template: |
-  Locate '{substring}' in the scene.
+  Identify the 3D location of '{substring}' in the scene.
 
-  Example output (format only): ... {{"x": 0.12, "y": -0.08, "z": 0.95}} ...
-
-
-# # splat graph: 3d point proposals by splat attention, final 3d point by qwen, project to 2d
-# splat_graph_attn_layer: 16
-# splat_graph_max_proposals: 10
-# splat_graph_include_scores_in_context: false
-# splat_graph_system_prompt: |
-#   You are an expert visceral surgeon analyzing a cholecystectomy scene using a scene graph and 3D point proposals.
-
-#   INPUT FORMAT:
-#   - <scene-graph>
-#     - <spatial-graphs> across timesteps t=0..T-1:
-#       - <spatial-graph timestep="k">
-#         - For each node n:
-#           <node id="n">
-#             <descriptor> [image descriptor] </descriptor>
-#             <center x="..." y="..." z="..."/>
-#             <centroid x="..." y="..." z="..."/>
-#             <extent x="..." y="..." z="..."/>
-#           </node>
-#         - For each interacting pair (n,m):
-#           <edge from="n" to="m" overlap_score="..." centroid_distance="..."/>
-#       - </spatial-graph>
-#     - </spatial-graphs>
-#   - </scene-graph>
-
-#   SPATIAL REASONING WITH GRAPHS:
-#   Use the graph to infer the 3D location of the queried concept:
-#   - Pay attention to node centroids and extents to infer the 3D location of objects present in the scene.
-#   - You can find distances between objects by looking at the centroid distance properties of graph edges.
-#   - Large overlap scores indicate that objects interact or touch. Small overlap scores indicate that objects do not interact or touch.
-
-#   You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y, z.
-
-#   RULES:
-#   - Always infer a best-guess 3D location for the queried concept using surgical knowledge, synonyms, and spatial understanding of the provided objects, relationships, and extents.
-#   - Never refuse. Never say the concept is missing. Never return an empty object.
-#   - You may briefly reason first. Then, on a new line at the end, output ONLY a final JSON object with numeric fields: x, y, z.
-#   - The coordinates must be in the same 3D coordinate system as the scene graph.
-# splat_graph_prompt_template: |
-#   YOUR TASK: Identify the best 3D point proposal for the queried concept.
-
-#   QUERY CONCEPT: '{substring}'
-
-#   Output format: respond ONLY with a valid JSON object having numeric fields x, y, z.
-#   Example (format only): {{"x": 0.12, "y": -0.08, "z": 0.95}}
+  Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...

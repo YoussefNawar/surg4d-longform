@@ -11,8 +11,6 @@ from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 from llm.qwen_utils import get_patched_qwen
 
 from benchmark.benchmark_config import BenchmarkConfig
-from benchmark.frame_selectors import TripletsFrameSelector
-from benchmark.frame_evaluators import TripletsFrameEvaluator
 from benchmark.temporal import (
     load_video_frames,
     multiframe_queries,
@@ -30,10 +28,6 @@ from benchmark.spatial import (
     frame_attn_refine_feat_queries,
     frame_direct_feat_queries,
     graph_agent_feat_queries,
-)
-from rerun_utils import (
-    init_and_save_rerun,
-    log_spatial_predictions,
 )
 
 
@@ -87,62 +81,123 @@ def evaluate_triplets(
     processor: Qwen2_5_VLProcessor,
 ):
     """Run triplet recognition evaluation for a single clip."""
-    if cfg.get("eval") is None or cfg.eval.get("triplets") is None:
+    if cfg.eval is None or cfg.eval.triplets is None:
         return
-    bench_cfg = _build_benchmark_config(cfg, clip)
-    triplets_cfg = bench_cfg.triplets_config
-    assert triplets_cfg is not None, "cfg.eval.triplets must be provided"
-    if triplets_cfg is None:
-        return
-
+    
+    from benchmark.triplets import (
+        load_triplet_samples,
+        single_frame_queries,
+        single_frame_mask_overlay_queries,
+        multiframe_queries,
+        multiframe_mask_overlay_queries,
+        graph_agent_single_queries,
+        graph_agent_dynamic_queries,
+    )
+    from benchmark.cholect50_utils import CholecT50Loader
+    
     print(f"\n{'=' * 80}")
     print(f"TRIPLETS EVALUATION: {clip.name}")
     print(f"{'=' * 80}")
-
+    
+    # Parse video_id and clip_start from clip name (e.g., "video01_00100")
+    clip_name = str(clip.name)
     try:
-        selector = TripletsFrameSelector(bench_cfg)
-        samples = selector.select_sequences()
+        video_id = int(clip_name.split("_")[0].replace("video", ""))
+        clip_start = int(clip_name.split("_")[1])
+    except Exception as e:
+        print(f"ERROR: Could not parse clip name '{clip_name}': {e}")
+        return
+    
+    # CholecT50 only has annotations for videos 1-50
+    if video_id > 50:
+        print(f"Skipping: CholecT50 annotations only available for videos 1-50 (got video {video_id})")
+        return
+    
+    # Load GT samples
+    video_dir = Path(cfg.preprocessed_root) / clip_name
+    cholect50_loader = CholecT50Loader(str(cfg.cholect50_root))
+    
+    try:
+        samples = load_triplet_samples(
+            video_dir=video_dir,
+            clip_start=clip_start,
+            video_id=video_id,
+            cholect50_loader=cholect50_loader,
+            images_subdir=cfg.eval.paths.images_subdir,
+            framerate=cfg.eval.triplets.FRAMERATE,
+            num_frames=cfg.eval.triplets.NUM_FRAMES,
+            frame_stride=cfg.eval.triplets.frame_stride,
+        )
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
         print("Skipping triplets evaluation for this clip.")
-        print("CholecT50 labels are only available for videos 1-50.")
         return
-
+    
     if not samples:
-        print("ERROR: No samples selected! Check if preprocessed data is available.")
+        print("ERROR: No samples found! Check if preprocessed data is available.")
         return
-
-    selector.print_summary(samples)
-
-    evaluator = TripletsFrameEvaluator(bench_cfg, model=model, processor=processor)
-    results = evaluator.run_ablation_study(
-        samples,
-        ablations=bench_cfg.triplets_config["ablations"],  # type: ignore[index]
-    )
-
-    # Convert to prediction dump analogous to temporal eval
-    preds_by_ablation: dict[str, list[dict]] = {}
-    for ablation, payload in results.get("conditions", {}).items():
-        ablation_results = payload.get("results", [])
-        preds_by_ablation[ablation] = [
-            {
-                "sample_id": r.get("sample_id"),
-                "video_id": r.get("video_id"),
-                "clip_start": r.get("clip_start"),
-                "end_frame": r.get("end_frame"),
-                "second_idx": r.get("second_idx"),
-                "predicted": r.get("predicted_triplets", []),
-                "raw_response": r.get("response"),
-            }
-            for r in ablation_results
-        ]
-
+    
+    print(f"Loaded {len(samples)} evaluation samples")
+    
+    # Get graph path if needed
+    graph_path = Path(cfg.output_root) / clip_name / cfg.eval.paths.graph_subdir
+    
+    # Map method names to strategy functions
+    method_map = {
+        "single_frame": single_frame_queries,
+        "single_frame_mask_overlay": single_frame_mask_overlay_queries,
+        "multiframe": multiframe_queries,
+        "multiframe_mask_overlay": multiframe_mask_overlay_queries,
+        "graph_agent_single": graph_agent_single_queries,
+        "graph_agent_dynamic": graph_agent_dynamic_queries,
+    }
+    
+    # Collect predictions for all methods
+    all_results = {}
+    
+    for method_name in cfg.eval.triplets.methods:
+        if method_name not in method_map:
+            print(f"WARNING: Unknown method '{method_name}', skipping")
+            continue
+        
+        print(f"\nRunning method: {method_name}")
+        strategy_fn = method_map[method_name]
+        
+        # Call strategy function (with graph_path for agent methods)
+        if "graph_agent" in method_name:
+            if not graph_path.exists():
+                print(f"  WARNING: Graph not found at {graph_path}, skipping {method_name}")
+                continue
+            results = strategy_fn(
+                model=model,
+                processor=processor,
+                samples=samples,
+                graph_path=graph_path,
+                clip=clip,
+                cfg=cfg,
+            )
+        else:
+            results = strategy_fn(
+                model=model,
+                processor=processor,
+                samples=samples,
+                clip=clip,
+                cfg=cfg,
+            )
+        
+        all_results[method_name] = results
+        
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
     # Save per-clip predictions for compute_metrics stage
     pred_out_dir = Path(cfg.eval.triplets.output_dir)
     pred_out_dir.mkdir(parents=True, exist_ok=True)
     pred_out_file = pred_out_dir / f"{clip.name}.json"
+    
     with pred_out_file.open("w") as f:
-        json.dump({"clip": clip.name, "ablations": preds_by_ablation}, f, indent=2)
+        json.dump({"clip": clip.name, "methods": all_results}, f, indent=2)
 
 
 def evaluate_temporal(
@@ -411,19 +466,6 @@ def evaluate_spatial(
                     viz_dir=Path(cfg.eval.spatial.visualizations_dir),
                     method_name=viz_name,
                 )
-
-    # Initialize rerun sink for spatial visualization
-    init_and_save_rerun(graph_dir / "visualization_spatial.rrd")
-
-    # Log results for each method that was run
-    for method_key in all_results:
-        log_spatial_predictions(
-            base_path=method_key,
-            clip_name=clip.name,
-            positions_through_time=positions,
-            results=all_results[method_key],
-            cmap_name=cfg.eval.spatial.colormap,
-        )
 
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")

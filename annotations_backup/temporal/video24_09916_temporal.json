@@ -8,7 +8,7 @@
     {
       "query_id": "video24_09916_q1",
       "query_type": "action_onset",
-      "question": "When does the grasper first touch the gallbladder?",
+      "question": "bottom grasper starting to hold the gallbladder",
       "answer_format": "Timestep X",
       "ground_truth": {
         "frame": 12
@@ -18,12 +18,42 @@
     {
       "query_id": "video24_09916_q2",
       "query_type": "action_duration",
-      "question": "During which timesteps is the grasper actively pulling the gallbladder?",
+      "question": "top grasper holding the gallbladder",
       "answer_format": "Timesteps X-Y (or multiple ranges: X-Y, A-B)",
       "ground_truth": {
         "ranges": [
           [
-            14,
+            0,
+            19
+          ]
+        ]
+      },
+      "notes": "Use multiple ranges if action happens multiple times"
+    },
+    {
+      "query_id": "video24_09916_q3",
+      "query_type": "action_duration",
+      "question": "bottom grasper traveling from the duodenum to the gallbladder",
+      "answer_format": "Timesteps X-Y (or multiple ranges: X-Y, A-B)",
+      "ground_truth": {
+        "ranges": [
+          [
+            2,
+            10
+          ]
+        ]
+      },
+      "notes": "Use multiple ranges if action happens multiple times"
+    },
+    {
+      "query_id": "video24_09916_q4",
+      "query_type": "action_duration",
+      "question": "bottom grasper pulling on the gallbladder",
+      "answer_format": "Timesteps X-Y (or multiple ranges: X-Y, A-B)",
+      "ground_truth": {
+        "ranges": [
+          [
+            12,
             19
           ]
         ]

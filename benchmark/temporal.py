@@ -11,6 +11,7 @@ Supports temporal query types:
 
 import gc
 import json
+import re
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
@@ -434,7 +435,6 @@ def multiframe_queries(
             last_frame=len(selected_frames) - 1,
         )
         
-        # Query model
         response = prompt_with_video_frames(
             question=prompt,
             image_paths=selected_frames,
@@ -442,7 +442,6 @@ def multiframe_queries(
             processor=processor,
             qwen_version=cfg.eval.qwen_version,
             system_prompt=system_prompt,
-            max_tokens=2048,
             fps=effective_fps,
         )
         
@@ -732,14 +731,12 @@ def graph_agent_queries(
     # Get number of timesteps
     num_ts = adjacency.shape[0]
     
-    # Calculate effective FPS based on stride (same logic as multiframe_queries)
-    # The graph has num_ts timesteps sampled from len(video_frames) video frames
-    stride = max(1, round(len(video_frames) / num_ts))
-    effective_fps = cfg.eval.video_fps / stride
-    
     # Load autoencoder for highres inspection tools (following spatial pattern)
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-    autoencoder_path = clip_dir / cfg.eval.temporal.graph_agent_autoencoder_checkpoint_subdir / "best_ckpt.pth"
+    if cfg.eval.temporal.graph_agent_use_global_autoencoder:
+        autoencoder_path = Path(cfg.preprocessed_root) / cfg.eval.temporal.graph_agent_global_autoencoder_checkpoint_dir / "best_ckpt.pth"
+    else:
+        clip_dir = Path(cfg.preprocessed_root) / clip.name
+        autoencoder_path = clip_dir / cfg.eval.temporal.graph_agent_autoencoder_checkpoint_subdir / "best_ckpt.pth"
     
     autoencoder = QwenAutoencoder(
         input_dim=cfg.eval.temporal.graph_agent_autoencoder_full_dim,
@@ -762,8 +759,14 @@ def graph_agent_queries(
         qwen_feats=node_feats_npz,
         patch_latents_through_time=patch_latents_through_time,
         autoencoder=autoencoder,
-        fps=effective_fps,
     )
+    
+    # Setup tool visualization directory if configured
+    tool_viz_enabled = cfg.eval.temporal.tool_viz_dir is not None
+    tool_viz_dir = None
+    if tool_viz_enabled:
+        tool_viz_dir = Path(cfg.eval.temporal.tool_viz_dir) / clip.name
+        tool_viz_dir.mkdir(parents=True, exist_ok=True)
     
     # Parse graph_agent_tools config (list of objects with name and max_calls)
     tool_names = []
@@ -796,6 +799,17 @@ def graph_agent_queries(
     results = []
     for query_anno in annotations:
         query_type = query_anno['query_type']
+        query_id = query_anno['query_id']
+        question_text = query_anno['question']
+        
+        # Start recording if tool visualization is enabled
+        if tool_viz_enabled:
+            # Sanitize question text for filename
+            sanitized_question = re.sub(r'[^\w\s-]', '', question_text)  # Remove special chars
+            sanitized_question = re.sub(r'\s+', '_', sanitized_question)  # Replace whitespace with _
+            sanitized_question = sanitized_question[:50]  # Limit length
+            rrd_file = tool_viz_dir / f"{query_id}_{sanitized_question}.rrd"
+            graph_tools.start_recording(str(rrd_file))
         
         system_prompt_key = f"graph_agent_{query_type}_system_prompt"
         template_key = f"graph_agent_{query_type}_prompt_template"
@@ -829,8 +843,11 @@ def graph_agent_queries(
             system_prompt=system_prompt,
             max_iterations=cfg.eval.temporal.graph_agent_max_iterations,
             tool_call_limits=tool_call_limits,
-            fps=effective_fps,
         )
+        
+        # Stop recording if tool visualization is enabled
+        if tool_viz_enabled:
+            graph_tools.stop_recording()
         
         # Extract response (agent_result is a dict when tools are used)
         if isinstance(agent_result, dict):
@@ -843,20 +860,8 @@ def graph_agent_queries(
             message_history = []
         
         # Parse response
+        # Graph agent now returns timesteps directly (not seconds), so no conversion needed
         predicted = parser_map[query_type](response, query_type)
-        
-        # Convert seconds to timesteps if using seconds format (same logic as multiframe)
-        if predicted and 'second' in predicted:
-            # Convert single second to timestep
-            predicted['timestep'] = seconds_to_timestep(predicted['second'], num_ts, effective_fps)
-        elif predicted and 'second_ranges' in predicted:
-            # Convert second ranges to timestep ranges
-            timestep_ranges = []
-            for start_sec, end_sec in predicted['second_ranges']:
-                start_timestep = seconds_to_timestep(start_sec, num_ts, effective_fps)
-                end_timestep = seconds_to_timestep(end_sec, num_ts, effective_fps)
-                timestep_ranges.append([start_timestep, end_timestep])
-            predicted['ranges'] = timestep_ranges
         
         results.append({
             'query_id': query_anno['query_id'],

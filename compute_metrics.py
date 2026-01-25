@@ -501,15 +501,20 @@ def compute_triplets_metrics(cfg: DictConfig):
 
         per_clip_out: Dict[str, Dict] = {}
 
-        for ablation, items in preds.get('ablations', {}).items():
+        # Support both old "ablations" and new "methods" keys
+        methods_data = preds.get('methods', preds.get('ablations', {}))
+        
+        for method_name, items in methods_data.items():
             results = []
             for item_idx, item in enumerate(items):
                 video_id = int(item.get('video_id')) if item.get('video_id') is not None else None
                 second_idx = int(item.get('second_idx')) if item.get('second_idx') is not None else None
+                # Support both "predicted" and "ground_truth" keys (new) vs embedded GT (old)
                 predicted = item.get('predicted') or []
+                gt_trips = item.get('ground_truth', [])
 
-                gt_trips: List[Dict] = []
-                if video_id is not None and second_idx is not None:
+                # If GT not already in item, fetch from CholecT50
+                if not gt_trips and video_id is not None and second_idx is not None:
                     if video_id not in video_cache:
                         try:
                             video_cache[video_id] = loader.load_video_annotations(video_id)
@@ -534,14 +539,14 @@ def compute_triplets_metrics(cfg: DictConfig):
                     'raw_response': item.get('raw_response'),
                 })
 
-            # Aggregate per ablation for this clip
+            # Aggregate per method for this clip
             n = max(1, len(results))
             instrument_acc = sum(1 for r in results if r['metrics'].get('instrument')) / n
             verb_acc = sum(1 for r in results if r['metrics'].get('verb')) / n
             target_acc = sum(1 for r in results if r['metrics'].get('target')) / n
             triplet_acc = sum(1 for r in results if r['metrics'].get('triplet')) / n
 
-            per_clip_out[ablation] = {
+            per_clip_out[method_name] = {
                 'metrics': {
                     'instrument_acc': round(float(instrument_acc), 2),
                     'verb_acc': round(float(verb_acc), 2),
@@ -553,15 +558,15 @@ def compute_triplets_metrics(cfg: DictConfig):
             }
 
             # Add to dataset accumulators
-            dataset.setdefault(ablation, []).extend(results)
+            dataset.setdefault(method_name, []).extend(results)
 
         # Save per-clip results file
         with (out_dir / f"{clip_name}.json").open('w') as f:
-            json.dump({'clip': clip_name, 'ablations': per_clip_out}, f, indent=2)
+            json.dump({'clip': clip_name, 'methods': per_clip_out}, f, indent=2)
 
-    # Aggregate dataset-wide per ablation
+    # Aggregate dataset-wide per method
     summary: Dict[str, Dict] = {}
-    for ablation, items in dataset.items():
+    for method_name, items in dataset.items():
         # ENFORCE VARIANCE ACROSS SAMPLES: Check if all predictions have same/similar confidence
         all_confs = []
         for r in items:
@@ -571,7 +576,7 @@ def compute_triplets_metrics(cfg: DictConfig):
         
         unique_confs = set(all_confs)
         if len(unique_confs) <= 3 and len(all_confs) > 10:  # Too little variance
-            print(f"⚠️  {ablation}: Enforcing variance (found only {len(unique_confs)} unique confidence values)")
+            print(f"⚠️  {method_name}: Enforcing variance (found only {len(unique_confs)} unique confidence values)")
             
             # Store per-component confidences for proper mAP computation
             # Key insight: confidence should reflect correctness of THAT COMPONENT, not full triplet
@@ -767,7 +772,7 @@ def compute_triplets_metrics(cfg: DictConfig):
         map_iv = _compute_map_legacy('iv')
         map_it = _compute_map_legacy('it')
 
-        summary[ablation] = {
+        summary[method_name] = {
             'metrics': {
                 'instrument_acc': round(float(instrument_acc), 2),
                 'verb_acc': round(float(verb_acc), 2),
@@ -784,7 +789,7 @@ def compute_triplets_metrics(cfg: DictConfig):
         }
 
     with aggregated_file.open('w') as f:
-        json.dump({'ablations': summary}, f, indent=2)
+        json.dump({'methods': summary}, f, indent=2)
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")
 def main(cfg: DictConfig):

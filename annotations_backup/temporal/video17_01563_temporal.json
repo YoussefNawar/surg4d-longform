@@ -8,7 +8,7 @@
     {
       "query_id": "video17_01563_q1",
       "query_type": "action_onset",
-      "question": "When does the grasper let go of the gallbladder?",
+      "question": "gallbladder snaps away from the grasper",
       "answer_format": "Timestep X",
       "ground_truth": {
         "frame": 11
@@ -18,7 +18,7 @@
     {
       "query_id": "video17_01563_q2",
       "query_type": "action_duration",
-      "question": "During which timesteps is tissue being grasped?",
+      "question": "grasper holding the tip of the gallbladder",
       "answer_format": "Timesteps X-Y (or multiple ranges: X-Y, A-B)",
       "ground_truth": {
         "ranges": [

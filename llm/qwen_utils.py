@@ -2,6 +2,7 @@ import torch
 import math
 import json
 import re
+import time
 import numpy as np
 from PIL import Image
 from transformers import (
@@ -190,13 +191,15 @@ def get_patched_qwen3(
     torch_dtype: torch.dtype = torch.bfloat16,
     device_map: Union[str, Dict[str, str]] = "auto",
     max_memory: Optional[Dict[str, str]] = None,
+    repetition_penalty: float = None,
 ):
     """Get a patched Qwen3VL model/processor that supports raw patch features.
 
     Uses inheritance-based patching via __class__ swapping after from_pretrained.
     Parameters allow enabling weight quantization and optimized attention without editing Transformers.
     """
-    model_path = "Qwen/Qwen3-VL-8B-Instruct"
+    model_path = "Qwen/Qwen3-VL-8B-Thinking"
+    # model_path = "Qwen/Qwen3-VL-32B-Thinking"
 
     quantization_config = None
     if use_bnb_4bit:
@@ -228,6 +231,8 @@ def get_patched_qwen3(
     processor = Qwen3VLProcessor.from_pretrained(model_path)
     # Prefer new cache format for memory-efficient caches
     model.generation_config.return_legacy_cache = False
+    if repetition_penalty is not None:
+        model.generation_config.repetition_penalty = repetition_penalty
     model.eval()
     return model, processor
 
@@ -316,13 +321,28 @@ def qwen_encode_image(
 
 
 # This function takes in an RGB image  and a prompt
+def _set_generation_seed(seed: int) -> None:
+    """Set random seed for deterministic generation without enabling torch deterministic mode.
+
+    This seeds the RNG for sampling-based generation while avoiding the performance
+    and compatibility issues of torch.backends.cudnn.deterministic.
+
+    Args:
+        seed: Random seed value
+    """
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def ask_qwen_about_image(
     image: Image.Image,
     prompt: str,
     model: Qwen2_5_VLForConditionalGeneration,
     processor: Qwen2_5_VLProcessor,
     system_prompt: str = "You are a medical assistant designed to aid medical practitioners during a cholecystectomy procedure. The surgeon user will ask you a question and show you their current situation, and you give a concise answer.",
-    max_tokens: int = 128,
+    max_tokens: int = 5012,
+    seed: int = 42,
 ):
     messages = [
         {
@@ -351,10 +371,11 @@ def ask_qwen_about_image(
         padding=True,
         return_tensors="pt",
     ).to(model.device)
+
+    _set_generation_seed(seed)
     generated_ids = model.generate(
         **inputs,
         max_new_tokens=max_tokens,
-        do_sample=False,
     )
     generated_ids_trimmed = [
         out_ids[len(in_ids) :]
@@ -385,7 +406,9 @@ def ask_qwen_about_image_features(
     model: Qwen2_5_VLForConditionalGeneration,
     processor: Qwen2_5_VLProcessor,
     system_prompt: str = "You are a medical assistant designed to aid medical practitioners during a cholecystectomy procedure. The surgeon user will ask you a question and show you their current situation, and you give a concise answer.",
-    max_tokens: int = 128,
+    max_tokens: int = 5012,
+    seed: int = 42,
+    qwen_version: str = "qwen25",
 ):
     messages = [
         {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
@@ -398,7 +421,7 @@ def ask_qwen_about_image_features(
         },
     ]
     return generate_with_vision_features(
-        messages, [image_features], model, processor, max_tokens=max_tokens
+        messages, [image_features], model, processor, qwen_version=qwen_version, max_tokens=max_tokens, seed=seed
     )
 
 
@@ -458,7 +481,8 @@ def generate_with_vision_features(
     model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
     processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
     qwen_version: str = "qwen25",
-    max_tokens: int = 128,
+    max_tokens: int = 5012,
+    seed: int = 42,
 ):
     """Generate text from vision features.
 
@@ -471,6 +495,7 @@ def generate_with_vision_features(
         processor: Qwen processor
         qwen_version: Either "qwen25" or "qwen3"
         max_tokens: Maximum tokens to generate
+        seed: Random seed for deterministic sampling
 
     Returns:
         Generated text response
@@ -486,10 +511,10 @@ def generate_with_vision_features(
             messages, main_features, processor, qwen_version=qwen_version
         ).to(model.device)
 
+        _set_generation_seed(seed)
         generated_ids = model.generate(
             **inputs,
             max_new_tokens=max_tokens,
-            do_sample=False,
             custom_patch_features=main_features,
             custom_deepstack_features=deepstack_features,
         )
@@ -499,10 +524,10 @@ def generate_with_vision_features(
             messages, vision_features, processor, qwen_version=qwen_version
         ).to(model.device)
 
+        _set_generation_seed(seed)
         generated_ids = model.generate(
             **inputs,
             max_new_tokens=max_tokens,
-            do_sample=False,
             custom_patch_features=vision_features,
         )
 
@@ -728,6 +753,8 @@ def generate_with_vision_features_agentic(
     max_tokens: int = 5012,
     max_iterations: int = 10,
     tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
+    verbose: bool = False,
+    seed: int = 42,
 ) -> Dict[str, Any]:
     """Generate with vision features in an agentic loop, executing tools until done.
 
@@ -752,6 +779,8 @@ def generate_with_vision_features_agentic(
         max_iterations: Maximum number of tool-calling iterations
         tool_call_limits: Optional dict mapping tool_name -> max_calls (int or None for infinite).
             If None, all tools have infinite calls. If a tool is not in the dict, it defaults to infinite.
+        verbose: If True, prints message and tool results at each iteration.
+        seed: Random seed for deterministic sampling
 
     Returns:
         Dict with keys:
@@ -799,6 +828,10 @@ def generate_with_vision_features_agentic(
     all_vision_features = list(vision_features)
 
     for iteration in range(max_iterations):
+        if verbose:
+            timestamp = time.strftime("%H:%M:%S")
+            print(f"\n[{timestamp}] --- Iteration {iteration} ---", flush=True)
+
         # Convert accumulated features to deepstack format for this iteration
         main_features, deepstack_features = qwen3_format_multiple_deepstack_features(
             all_vision_features
@@ -814,10 +847,10 @@ def generate_with_vision_features_agentic(
         ).to(model.device)
 
         try:
+            _set_generation_seed(seed + iteration)
             generated_ids = model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
-                do_sample=False,
                 custom_patch_features=main_features,
                 custom_deepstack_features=deepstack_features,
             )
@@ -839,6 +872,10 @@ def generate_with_vision_features_agentic(
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )[0]
+
+        if verbose:
+            timestamp = time.strftime("%H:%M:%S")
+            print(f"[{timestamp}] [Assistant Response]:\n{response}\n", flush=True)
 
         # Parse tool calls
         tool_calls = _parse_tool_calls(response)
@@ -866,6 +903,10 @@ def generate_with_vision_features_agentic(
         for tool_call in tool_calls:
             tool_name = tool_call.get("name")
             arguments = tool_call.get("arguments", {})
+
+            if verbose:
+                timestamp = time.strftime("%H:%M:%S")
+                print(f"[{timestamp}] [Tool Call]: {tool_name}({json.dumps(_filter_tensors_for_debug(arguments))})", flush=True)
 
             if tool_name not in tools:
                 result = {"text": json.dumps({"error": f"Unknown tool '{tool_name}'"})}
@@ -917,6 +958,12 @@ def generate_with_vision_features_agentic(
                         )
                         result["text"] = json.dumps(result_data)
 
+            if verbose:
+                # Filter for logging
+                log_result = _filter_tensors_for_debug(result)
+                timestamp = time.strftime("%H:%M:%S")
+                print(f"[{timestamp}] [Tool Result]: {json.dumps(log_result)}\n", flush=True)
+
             tool_call_record = {
                 "tool_name": tool_name,
                 "arguments": arguments,
@@ -951,6 +998,7 @@ def prompt_with_graph_at_timestep(
     processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
     qwen_version: str = "qwen25",
     system_prompt: str = None,
+    seed: int = 42,
 ):
     """
     node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
@@ -1055,6 +1103,7 @@ def prompt_with_graph_at_timestep(
         processor=processor,
         qwen_version=qwen_version,
         max_tokens=5012,
+        seed=seed,
     )
 
 
@@ -1072,7 +1121,8 @@ def prompt_graph_agent(
     system_prompt: str = None,
     max_iterations: int = 20,
     tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
-    fps: float = None,
+    verbose: bool = False,
+    seed: int = 42,
 ):
     """
     node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
@@ -1085,7 +1135,7 @@ def prompt_graph_agent(
     processor: Qwen2_5_VLProcessor - processor to use
     system_prompt: str - system prompt to use
     tools: Dict[str, Tuple[Callable, Dict[str, Any]]] - tools to use
-    fps: Optional frames per second. If provided, uses seconds format instead of timestep.
+    verbose: If True, prints message and tool results at each iteration.
     """
     assert qwen_version == "qwen3", "qwen3 is required for graph agentic prompting"
     assert tools is not None and len(tools) > 0, (
@@ -1103,78 +1153,56 @@ def prompt_graph_agent(
     extents = node_extents[initial_timestep_idx]
     centers = node_centers[initial_timestep_idx]
 
-    # Format time reference
-    if fps is not None:
-        time_attr = f'timestep="{initial_timestep_idx}" {timestep_to_seconds_str(initial_timestep_idx, fps)}'
-    else:
-        time_attr = f'timestep="{initial_timestep_idx}"'
-
-    graph_content = []
-    graph_content.append(
-        {
-            "type": "text",
-            "text": f'<graph-nodes {time_attr}>\n',
-        }
-    )
+    # Build JSON structure with IMAGE_PLACEHOLDER markers for nodes
+    nodes_data = []
     for n in range(centroids.shape[0]):
-        graph_content.extend(
-            [
-                {
-                    "type": "text",
-                    "text": f'<node id="{n}">\n',
-                },
-                {
-                    "type": "text",
-                    "text": "<lowres-visual-descriptor>",
-                },
-                {
-                    "type": "image",
-                    "image": None,
-                },
-                {
-                    "type": "text",
-                    "text": "</lowres-visual-descriptor>\n",
-                },
-                {
-                    "type": "text",
-                    "text": f'<centroid x="{centroids[n][0]:.2f}" y="{centroids[n][1]:.2f}" z="{centroids[n][2]:.2f}"/>\n',
-                },
-                {
-                    "type": "text",
-                    "text": f'<bbox-center x="{centers[n][0]:.2f}" y="{centers[n][1]:.2f}" z="{centers[n][2]:.2f}"/>\n',
-                },
-                {
-                    "type": "text",
-                    "text": f'<bbox-extent x="{extents[n][0]:.2f}" y="{extents[n][1]:.2f}" z="{extents[n][2]:.2f}"/>\n',
-                },
-                {
-                    "type": "text",
-                    "text": "</node>\n",
-                },
-            ]
-        )
-    graph_content.append(
-        {
-            "type": "text",
-            "text": "</graph-nodes>\n",
-        }
-    )
+        nodes_data.append({
+            "node_id": int(n),
+            "rough_image": IMAGE_PLACEHOLDER,
+            "centroid": {
+                "x": round(float(centroids[n][0]), 2),
+                "y": round(float(centroids[n][1]), 2),
+                "z": round(float(centroids[n][2]), 2),
+            },
+            "bbox_center": {
+                "x": round(float(centers[n][0]), 2),
+                "y": round(float(centers[n][1]), 2),
+                "z": round(float(centers[n][2]), 2),
+            },
+            "bbox_extent": {
+                "x": round(float(extents[n][0]), 2),
+                "y": round(float(extents[n][1]), 2),
+                "z": round(float(extents[n][2]), 2),
+            },
+        })
 
-    # Add tool call limits information to the prompt
+    graph_data = {
+        "timestep": int(initial_timestep_idx),
+        "nodes": nodes_data,
+    }
+
+    # Serialize to JSON and split by IMAGE_PLACEHOLDER to interleave images
+    graph_json = json.dumps(graph_data, indent=2)
+    graph_parts = graph_json.split(IMAGE_PLACEHOLDER)
+    
+    # Build interleaved content: text, image, text, image, ..., text
+    graph_content = []
+    for i, part in enumerate(graph_parts):
+        if part:
+            graph_content.append({"type": "text", "text": part})
+        if i < len(nodes_data):
+            graph_content.append({"type": "image", "image": None})
+
+    # Add tool call limits information to the prompt (as JSON)
     tool_limits_content = []
     if tool_call_limits is not None:
-        tool_limits_content.append(
-            {"type": "text", "text": "<tool-call-limits>\n"}
-        )
+        tool_limits_data = {}
         for tool_name in tools.keys():
             limit = tool_call_limits.get(tool_name, None)
-            limit_str = "infinite" if limit is None else str(limit)
-            tool_limits_content.append(
-                {"type": "text", "text": f'<tool name="{tool_name}" remaining_calls="{limit_str}" />\n'}
-            )
-        tool_limits_content.append(
-            {"type": "text", "text": "</tool-call-limits>\n"}
-        )
+            tool_limits_data[tool_name] = "infinite" if limit is None else limit
+        
+        tool_limits_json = json.dumps({"tool_call_limits": tool_limits_data}, indent=2)
+        tool_limits_content.append({"type": "text", "text": tool_limits_json + "\n\n"})
 
     messages = [
         {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
@@ -1182,10 +1210,9 @@ def prompt_graph_agent(
             "role": "user",
             "content": [
                 *graph_content,
+                {"type": "text", "text": "\n\n"},
                 *tool_limits_content,
-                {"type": "text", "text": "<user-prompt>"},
                 {"type": "text", "text": question},
-                {"type": "text", "text": "</user-prompt>\n"},
             ],
         },
     ]
@@ -1200,6 +1227,8 @@ def prompt_graph_agent(
         max_tokens=5012,
         max_iterations=max_iterations,
         tool_call_limits=tool_call_limits,
+        verbose=verbose,
+        seed=seed,
     )
 
 
@@ -1216,6 +1245,7 @@ def prompt_with_static_graph(
     qwen_version: str = "qwen25",
     system_prompt: str = None,
     fps: float = None,
+    seed: int = 42,
 ):
     """
     node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
@@ -1339,6 +1369,7 @@ def prompt_with_static_graph(
         processor=processor,
         qwen_version=qwen_version,
         max_tokens=5012,
+        seed=seed,
     )
 
 
@@ -1354,6 +1385,7 @@ def prompt_with_dynamic_graph(
     qwen_version: str = "qwen25",
     system_prompt: str = None,
     fps: float = None,
+    seed: int = 42,
 ):
     assert (
         len(adjacency_matrices)
@@ -1468,6 +1500,7 @@ def prompt_with_dynamic_graph(
         processor=processor,
         qwen_version=qwen_version,
         max_tokens=5012,
+        seed=seed,
     )
 
 
@@ -1479,6 +1512,7 @@ def prompt_with_descriptors_at_timestep(
     processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
     qwen_version: str = "qwen25",
     system_prompt: str = None,
+    seed: int = 42,
 ):
     """
     Ablation of prompt_with_graph_at_timestep: only pass cluster descriptor images
@@ -1527,6 +1561,7 @@ def prompt_with_descriptors_at_timestep(
         processor=processor,
         qwen_version=qwen_version,
         max_tokens=5012,
+        seed=seed,
     )
 
 
@@ -1542,6 +1577,7 @@ def prompt_with_dynamic_descriptors(
     qwen_version: str = "qwen25",
     system_prompt: str = None,
     fps: float = None,
+    seed: int = 42,
 ):
     """
     Ablation of prompt_with_dynamic_graph: pass only descriptor images separated by
@@ -1607,6 +1643,7 @@ def prompt_with_dynamic_descriptors(
         processor=processor,
         qwen_version=qwen_version,
         max_tokens=5012,
+        seed=seed,
     )
 
 
@@ -1617,8 +1654,9 @@ def prompt_with_video_frames(
     processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
     qwen_version: str = "qwen3",
     system_prompt: str = None,
-    max_tokens: int = 2048,
+    max_tokens: int = 5012,
     fps: float = None,
+    seed: int = 42,
 ) -> str:
     """Prompt model with video frames (list of images).
     
@@ -1693,6 +1731,7 @@ def prompt_with_video_frames(
     ).to(model.device)
     
     # Generate
+    _set_generation_seed(seed)
     with torch.no_grad():
         generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
     

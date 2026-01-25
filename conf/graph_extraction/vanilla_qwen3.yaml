@@ -13,6 +13,8 @@ iteration: -1
 checkpoint_subdir: ${autoencoder.checkpoint_subdir}
 full_dim: ${autoencoder.full_dim}
 latent_dim: ${autoencoder.latent_dim}
+use_global_autoencoder: ${autoencoder.global_mode}
+global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
 
 # gaussian filtering before clustering
 # relevance is defined as opacity * ||language_feature||_2 in latent space
@@ -59,6 +61,7 @@ min_features_per_cluster: 4
 decode_batch_size: 1024
 
 # graph
+n_timesteps_filtering: 3
 n_timesteps: 20
 graph_edge_threshold: 0.05 # edge if bhattacharyya coefficient >= threshold
 

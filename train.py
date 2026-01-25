@@ -14,10 +14,17 @@ import os, sys
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss, cos_loss
+from utils.flow_utils import compute_raft_flow, compute_gaussian_flow, compute_flow_loss, visualize_flow
 from gaussian_renderer import render, network_gui, render_opacity
 import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
+from utils.vis_utils import (
+    get_camera_intrinsics_from_fov,
+    get_c2w_from_camera,
+    sample_points_with_rgb
+)
+import rerun as rr
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -202,6 +209,16 @@ def scene_reconstruction(
     viewpoint_stack = None
     ema_loss_for_log = 0.0
     ema_psnr_for_log = 0.0
+    
+    # Initialize rerun logging for fine stages
+    rerun_initialized = False
+    if "fine" in stage:
+        rerun_save_path = os.path.join(scene.model_path, f"rerun_{stage}.rrd")
+        rr.init(f"training_{stage}", spawn=False)
+        rr.save(rerun_save_path)
+        rr.log("/", rr.ViewCoordinates.RDF, static=True)  # Right-Down-Forward (OpenCV convention)
+        rerun_initialized = True
+        logger.info(f"Rerun logging initialized, will save to {rerun_save_path}")
 
     final_iter = train_iter
 
@@ -253,6 +270,28 @@ def scene_reconstruction(
     save_path = os.path.join(scene.model_path, "training_output_img")
     os.makedirs(save_path, exist_ok=True)
     total_time_ongt = 0
+    
+    # Initialize RAFT model for flow computation (only if flow loss is enabled)
+    raft_model = None
+    if (
+        "fine" in stage
+        and hasattr(args, "flow_loss_weight")
+        and args.flow_loss_weight > 0.0
+    ):
+        from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
+        weights = Raft_Large_Weights.DEFAULT
+        raft_model = raft_large(weights=weights, progress=False)
+        raft_model = raft_model.eval().cuda()
+    
+    # Cache previous batch renders for flow computation when batch_size == 1
+    # This allows computing flow between different cameras across iterations
+    previous_batch_renders = None
+
+    # Consistent indices for logging
+    num_gaussians = gaussians.get_xyz.shape[0]
+    print(f"#gaussians: {num_gaussians}")
+    sample_indices = torch.randperm(num_gaussians, device=gaussians.get_xyz.device)[:num_gaussians // 4]
+    
     for iteration in range(first_iter, final_iter + 1):
         # seed_everything(6666)
         if network_gui.conn == None:
@@ -404,9 +443,11 @@ def scene_reconstruction(
         language_feature_masks = []
         coff_list = []
         depth_maps = []
-        opacity_maps = []
         gt_depth_maps = []
 
+        # Collect all renders and gt_images first (needed for pairwise flow computation)
+        batch_renders = []
+        
         for viewpoint_cam in viewpoint_cams:
             render_pkg = render(
                 viewpoint_cam,
@@ -418,6 +459,20 @@ def scene_reconstruction(
                 cam_type=scene.dataset_type,
                 args=args,
             )
+            
+            # Get gt_image for current frame
+            if scene.dataset_type != "PanopticSports":
+                gt_image = viewpoint_cam.original_image.cuda()
+            else:
+                gt_image = viewpoint_cam["image"].cuda()
+            
+            # Store render and gt_image for potential flow computation
+            batch_renders.append({
+                "render_pkg": render_pkg,
+                "viewpoint_cam": viewpoint_cam,
+                "gt_image": gt_image,
+            })
+            
             (
                 image,
                 language_feature,
@@ -437,11 +492,6 @@ def scene_reconstruction(
 
             images.append(image.unsqueeze(0))
             start_time = time.time()
-            if scene.dataset_type != "PanopticSports":
-                gt_image = viewpoint_cam.original_image.cuda()
-            else:
-                gt_image = viewpoint_cam["image"].cuda()
-
             gt_images.append(gt_image.unsqueeze(0))
 
             depth_map = render_pkg["depth"]
@@ -450,18 +500,6 @@ def scene_reconstruction(
                 dataset.depth_path, split="train", data_type=scene.dataset_type
             )
             gt_depth_maps.append(gt_depth_map.unsqueeze(0))
-
-            opacity_map = render_opacity(
-                viewpoint_cam,
-                gaussians,
-                pipe,
-                background,
-                opt,
-                stage=stage,
-                cam_type=scene.dataset_type,
-                args=args,
-            )
-            opacity_maps.append(opacity_map)
 
             if "base" not in stage:
                 gt_language_feature, language_feature_mask = (
@@ -491,7 +529,6 @@ def scene_reconstruction(
             gt_language_feature_tensor = torch.cat(gt_language_features, 0)
         depth_map_tensor = torch.cat(depth_maps, 0)  # (batch, 1, h, w)
         gt_depth_map_tensor = torch.cat(gt_depth_maps, 0)
-        opacity_map_tensor = torch.stack(opacity_maps, 0)
 
         image_tensor = torch.cat(images, 0)
         gt_image_tensor = torch.cat(gt_images, 0)
@@ -499,36 +536,154 @@ def scene_reconstruction(
         # breakpoint()
         # print(dataset.lf_path)
         resdict = {}
+        # Image-based stage
         if "base" in stage:
             Ll1 = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
             resdict["rgb_l1"] = Ll1.item()
+
+            if args.depth_loss_weight != 0.0:
+                depth_loss = l1_loss(depth_map_tensor, gt_depth_map_tensor)
+                resdict["depth_l1"] = depth_loss.item()
+                Ll1 += args.depth_loss_weight * depth_loss
+        # Language feature stage
         else:
             Ll1 = args.lam * l1_loss(
                 language_feature_tensor * language_feature_mask_tensor,
                 gt_language_feature_tensor * language_feature_mask_tensor,
             )
             resdict["lang_l1"] = Ll1.item()
-            if os.getenv("addcosloss", "f") == "t":
-                cosloss = cos_loss(
-                    language_feature_tensor * language_feature_mask_tensor,
-                    gt_language_feature_tensor * language_feature_mask_tensor,
-                )
-                Ll1 += args.beta * cosloss
-                resdict["lang_l1"] = cosloss.item()
+
+            # if os.getenv("addcosloss", "f") == "t":
+            # # TODO: compare L1 and cos and make sure to put in configs
+            # Ll1 = 0.0
+            # # TODO: experiment with what this masking does?
+            # language_feature_mask_tensor = torch.ones_like(language_feature_mask_tensor)
+            # cosloss = cos_loss(
+            #     language_feature_tensor * language_feature_mask_tensor,
+            #     gt_language_feature_tensor * language_feature_mask_tensor,
+            # )
+            # print(f"weighted cosloss: {args.beta * cosloss.item()} with beta {args.beta}")
+            # Ll1 += args.beta * cosloss
+            # resdict["lang_l1"] = cosloss.item()
+
             if joint_train:
                 Ll1_rgb = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
                 resdict["rgb_l1"] = Ll1_rgb.item()
                 Ll1 += Ll1_rgb
-        if args.depth_loss_weight != 0.0:
-            depth_loss = l1_loss(
-                depth_map_tensor, gt_depth_map_tensor
-            )  # changed this to try L2 loss on depth
-            resdict["depth_l1"] = depth_loss.item()
-            Ll1 += args.depth_loss_weight * depth_loss
-        if args.opacity_loss_weight != 0.0:
-            opacity_loss = l1_loss(opacity_map_tensor, 1)
-            resdict["opacity_l1"] = opacity_loss.item()
-            Ll1 += args.opacity_loss_weight * opacity_loss
+        
+        # Flow loss: pairwise computation within batch or with previous batch (only in fine stages)
+        flow_losses = []
+        if (
+            "fine" in stage
+            and hasattr(args, "flow_loss_weight")
+            and args.flow_loss_weight > 0.0
+        ):
+            if len(batch_renders) > 1:
+                # Option 1: If batch_size > 1, compute pairwise flow between all pairs in current batch
+                for i in range(len(batch_renders)):
+                    for j in range(i + 1, len(batch_renders)):
+                        render_i = batch_renders[i]
+                        render_j = batch_renders[j]
+                        
+                        # Compute RAFT flow from camera i to camera j
+                        gt_flow = compute_raft_flow(
+                            render_i["gt_image"],
+                            render_j["gt_image"],
+                            raft_model,
+                        )
+                        
+                        # Compute Gaussian flow loss (i -> j)
+                        predicted_flow = compute_gaussian_flow(
+                            render_t_1=render_i["render_pkg"],
+                            render_t_2=render_j["render_pkg"],
+                        )
+
+                        # Visualize pseudo ground truth flow
+                        save_path_gt_flow = f"{save_path}/flow_gt_{render_i['viewpoint_cam'].colmap_id}_{render_j['viewpoint_cam'].colmap_id}.png"
+                        visualize_flow(
+                            flow=gt_flow.detach(),
+                            image1=render_i["gt_image"],
+                            image2=render_j["gt_image"],
+                            save_path=save_path_gt_flow
+                        )
+
+                        # Visualize rendered flow
+                        save_path_predicted_flow = f"{save_path}/flow_pred_{render_i['viewpoint_cam'].colmap_id}_{render_j['viewpoint_cam'].colmap_id}.png"
+                        visualize_flow(
+                            flow=predicted_flow.detach().permute(2, 0, 1), # Taking (H, W, 2) -> (2, H, W)
+                            image1=render_i["render_pkg"]["render"].detach(),
+                            image2=render_j["render_pkg"]["render"].detach(),
+                            save_path=save_path_predicted_flow
+                        )
+
+                        flow_thresh = getattr(args, "flow_thresh", 0.1)
+
+                        flow_loss_ij = compute_flow_loss(
+                            gt_flow=gt_flow,
+                            predicted_flow=predicted_flow,
+                            flow_thresh=flow_thresh,
+                        )
+                        flow_losses.append(flow_loss_ij)
+            
+            elif previous_batch_renders is not None:
+                # Option 2: If batch_size == 1, compute flow between current camera and previous batch's cameras
+                # This allows flow between different cameras across iterations
+                current_render = batch_renders[0]
+                
+                for prev_render in previous_batch_renders:
+                    # Only compute flow if cameras are different (different camera perspectives)
+                    if prev_render["viewpoint_cam"].colmap_id != current_render["viewpoint_cam"].colmap_id:
+                        # Compute RAFT flow from previous camera to current camera
+                        gt_flow = compute_raft_flow(
+                            prev_render["gt_image"],
+                            current_render["gt_image"],
+                            raft_model,
+                        )
+                        
+                        # Compute Gaussian flow loss
+                        predicted_flow = compute_gaussian_flow(
+                            render_t_1=prev_render["render_pkg"],
+                            render_t_2=current_render["render_pkg"],
+                        )
+
+                        flow_thresh = getattr(args, "flow_thresh", 0.1)
+                        flow_loss_ij = compute_flow_loss(
+                            gt_flow=gt_flow,
+                            predicted_flow=predicted_flow,
+                            flow_thresh=flow_thresh,
+                        )
+                        flow_losses.append(flow_loss_ij)
+
+                        # Visualize flow
+                        save_path_gt_flow = f"{save_path}/flow_gt_{prev_render['viewpoint_cam'].colmap_id}_{current_render['viewpoint_cam'].colmap_id}.png"
+                        visualize_flow(
+                            flow=gt_flow,
+                            image1=prev_render["gt_image"],
+                            image2=current_render["gt_image"],
+                            save_path=save_path_gt_flow
+                        )
+                        
+                        save_path_predicted_flow = f"{save_path}/flow_pred_{prev_render['viewpoint_cam'].colmap_id}_{current_render['viewpoint_cam'].colmap_id}.png"
+                        visualize_flow(
+                            flow=predicted_flow.permute(2, 0, 1), # Taking (H, W, 2) -> (2, H, W)
+                            image1=prev_render["render_pkg"]["render"],
+                            image2=current_render["render_pkg"]["render"],
+                            save_path=save_path_predicted_flow
+                        )
+            
+            # Store current batch for next iteration (only if batch_size == 1)
+            if len(batch_renders) == 1:
+                previous_batch_renders = batch_renders
+            else:
+                # If batch_size > 1, don't cache (we compute within batch)
+                previous_batch_renders = None
+            
+            if len(flow_losses) > 0:
+                flow_loss = torch.stack(flow_losses).mean()
+                resdict["flow_loss"] = flow_loss.item()
+                print(f"weighted flow_loss: {args.flow_loss_weight * flow_loss.item()}\n")
+                Ll1 += args.flow_loss_weight * flow_loss
+        
         # if opt.include_feature:
         #     Ll1 += l1_loss(language_feature*language_feature_mask, gt_language_feature*language_feature_mask)
         # loss = Ll1
@@ -560,10 +715,145 @@ def scene_reconstruction(
 
             #
             concatenated_image.save(
-                os.path.join(save_path, f"output_{stage}_{iteration}.png")
+                os.path.join(save_path, f"output_{stage}_{iteration}_{viewpoint_cam.colmap_id}.png")
             )
             if os.getenv("wandb", "f") == "t":
                 wandb.log({"training images": wandb.Image(concatenated_image)})
+            
+            # Rerun logging for fine stages - log camera poses and point clouds
+            if rerun_initialized and "fine" in stage:
+                
+                for cam_idx, viewpoint_cam in enumerate(viewpoint_cams):
+                    # Get camera intrinsics and extrinsics
+                    K = get_camera_intrinsics_from_fov(
+                        viewpoint_cam.FoVx, viewpoint_cam.FoVy,
+                        viewpoint_cam.image_width, viewpoint_cam.image_height
+                    )
+                    c2w = get_c2w_from_camera(viewpoint_cam)                    
+
+                    rr.set_time_sequence("timestep", sequence=int(viewpoint_cam.time * 1000))
+                    
+                    # Log camera transform (camera-to-world)
+                    rr.log(
+                        f"world/camera_{cam_idx}",
+                        rr.Transform3D(
+                            translation=c2w[:3, 3].detach().cpu().numpy(),
+                            mat3x3=c2w[:3, :3].detach().cpu().numpy(),
+                        ),
+                    )
+                    
+                    # Log camera pinhole model
+                    rr.log(
+                        f"world/camera_{cam_idx}",
+                        rr.Pinhole(
+                            resolution=[viewpoint_cam.image_width, viewpoint_cam.image_height],
+                            focal_length=[K[0, 0].item(), K[1, 1].item()],
+                            principal_point=[K[0, 2].item(), K[1, 2].item()],
+                            camera_xyz=rr.ViewCoordinates.RDF,
+                            image_plane_distance=0.1,
+                        ),
+                    )
+                    
+                    # Log the ground truth image
+                    if scene.dataset_type != "PanopticSports":
+                        gt_img_np = viewpoint_cam.original_image.permute(1, 2, 0).cpu().numpy()
+                    else:
+                        gt_img_np = viewpoint_cam["image"].permute(1, 2, 0).cpu().numpy()
+                    gt_img_np = (gt_img_np * 255).astype(np.uint8)
+                    rr.log(f"world/camera_{cam_idx}/image", rr.Image(gt_img_np))
+                    
+                    # Generate and log point cloud from depth map (25% sampled)
+                    gt_depth = viewpoint_cam.get_depth_map(
+                        dataset.depth_path, split="train", data_type=scene.dataset_type
+                    )
+                    if gt_depth is not None:
+                        gt_depth_squeezed = gt_depth.squeeze(0).cuda()  # (H, W)
+                        if scene.dataset_type != "PanopticSports":
+                            gt_rgb_for_pc = viewpoint_cam.original_image.cuda()
+                        else:
+                            gt_rgb_for_pc = viewpoint_cam["image"].cuda()
+                        
+                        # # Sample 25% of points
+                        # points, colors = sample_points_with_rgb(
+                        #     gt_depth_squeezed, gt_rgb_for_pc, K.cuda(), c2w.cuda(),
+                        #     sample_ratio=0.25
+                        # )
+                        
+                        # if len(points) > 0:
+                        #     # Convert colors from [0,1] to [0,255] uint8
+                        #     colors_uint8 = (colors.detach().cpu().numpy() * 255).astype(np.uint8)
+                        #     rr.log(
+                        #         "world/point_cloud_depth",
+                        #         rr.Points3D(
+                        #             positions=points.detach().cpu().numpy(),
+                        #             colors=colors_uint8,
+                        #             radii=0.002,
+                        #         ),
+                        #     )
+                
+                    # Log BOTH base and deformed Gaussian means for comparison
+                    # Get base Gaussian properties - use raw parameters like the renderer does
+                    means3D = gaussians.get_xyz
+                    scales = gaussians._scaling  # Raw, not get_scaling (which applies activation)
+                    rotations = gaussians._rotation  # Raw, not get_rotation
+                    opacity = gaussians._opacity  # Raw
+                    shs = gaussians.get_features
+                    language_feature = gaussians.get_language_feature
+                    
+                    # Get colors from base SH DC component (shared)
+                    sampled_shs = shs[sample_indices, 0, :].detach().cpu().numpy()
+                    sampled_colors_rgb = (sampled_shs * 0.28209479177387814 + 0.5).clip(0, 1)
+                    sampled_colors_uint8 = (sampled_colors_rgb * 255).clip(0, 255).astype(np.uint8)
+                    
+                    # # Log BASE (undeformed) Gaussian positions in BLUE
+                    # sampled_base_xyz = means3D[sample_indices].detach().cpu().numpy()
+                    # rr.log(
+                    #     "world/gaussians_base",
+                    #     rr.Points3D(
+                    #         positions=sampled_base_xyz,
+                    #         colors=np.full((len(sampled_base_xyz), 3), [0, 100, 255], dtype=np.uint8),  # Blue
+                    #         radii=0.002,
+                    #     ),
+                    # )
+                    
+                    # Create time tensor for all Gaussians - use repeat() like the renderer
+                    time_tensor = torch.tensor(viewpoint_cam.time).to(means3D.device).repeat(means3D.shape[0], 1)
+                    
+                    # Apply deformation to get deformed positions
+                    with torch.no_grad():
+                        means3D_deformed, scales_deformed, rotations_deformed, opacity_deformed, shs_deformed, lang_deformed, coff = gaussians._deformation(
+                            means3D, scales, rotations, opacity, shs, language_feature, time_tensor
+                        )
+                    
+                    # # Log DEFORMED Gaussian positions with actual colors
+                    # sampled_deformed_xyz = means3D_deformed[sample_indices].detach().cpu().numpy()
+                    # rr.log(
+                    #     "world/gaussians_deformed",
+                    #     rr.Points3D(
+                    #         positions=sampled_deformed_xyz,
+                    #         colors=sampled_colors_uint8,
+                    #         radii=0.003,
+                    #     ),
+                    # )
+
+                    # Log the precomputed positions, using viewpoint_cam.time to get the frame index
+                    if gaussians._control_point_positions_precomputed is not None and gaussians._is_control_point_driven is not None:
+                        frame_idx = int(time_tensor[0, 0].item() * (gaussians._num_frames - 1))
+                        precomputed_positions = gaussians._control_point_positions_precomputed[frame_idx]
+                        
+                        if len(sample_indices) > 0:
+                            sampled_precomputed_positions = precomputed_positions[sample_indices].detach().cpu().numpy()
+                            rr.log(
+                                "world/gaussians_precomputed",
+                                rr.Points3D(
+                                    positions=sampled_precomputed_positions,
+                                    # Use the colors of the control point driven Gaussians
+                                    colors=sampled_colors_uint8,
+                                    radii=0.003,
+                                ),
+                            )
+
+                    
         # print(f"language_feature.max():{language_feature.max()},language_feature.min():f{language_feature.min()}")
         ################################
 
@@ -645,20 +935,21 @@ def scene_reconstruction(
                     or (iteration < 3000 and iteration % 50 == 49)
                     or (iteration < 60000 and iteration % 100 == 99)
                 ):
-                    render_training_image(
-                        scene,
-                        gaussians,
-                        [test_cams[iteration % len(test_cams)]],
-                        render,
-                        pipe,
-                        background,
-                        opt,
-                        stage + "test",
-                        iteration,
-                        timer.get_elapsed_time(),
-                        scene.dataset_type,
-                        args,
-                    )
+                    if len(test_cams) > 0:
+                        render_training_image(
+                            scene,
+                            gaussians,
+                            [test_cams[iteration % len(test_cams)]],
+                            render,
+                            pipe,
+                            background,
+                            opt,
+                            stage + "test",
+                            iteration,
+                            timer.get_elapsed_time(),
+                            scene.dataset_type,
+                            args,
+                        )
                     render_training_image(
                         scene,
                         gaussians,
@@ -973,10 +1264,14 @@ def training_report(
         validation_configs = (
             {
                 "name": "test",
-                "cameras": [
-                    scene.getTestCameras()[idx % len(scene.getTestCameras())]
-                    for idx in range(10, 5000, 299)
-                ],
+                "cameras": (
+                    []
+                    if len(scene.getTestCameras()) == 0
+                    else [
+                        scene.getTestCameras()[idx % len(scene.getTestCameras())]
+                        for idx in range(10, 5000, 299)
+                    ]
+                ),
             },
             {
                 "name": "train",
@@ -1148,6 +1443,8 @@ if __name__ == "__main__":
     # custom loss stuff
     parser.add_argument("--depth_loss_weight", type=float, default=0.0)
     parser.add_argument("--opacity_loss_weight", type=float, default=0.0)
+    parser.add_argument("--flow_loss_weight", type=float, default=0.0)
+    parser.add_argument("--flow_thresh", type=float, default=0.1)
 
     args = parser.parse_args(sys.argv[1:])
     if args.configs:

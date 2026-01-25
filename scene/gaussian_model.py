@@ -67,6 +67,12 @@ class GaussianModel:
         self._deformation_table = torch.empty(0)
         self.setup_functions()
         self._language_feature = None
+        
+        # CoTracker3 control point support (optional)
+        self._is_control_point_driven = None  # (N_gaussians,) boolean mask
+        self._control_point_positions_precomputed = None  # (T, N_gaussians, 3) or None, precomputed positions for control-point-driven Gaussians
+        self._num_frames = None  # Number of frames (T) for time-to-frame conversion
+        self._cotracker_data = None  # dict with control point data (set in Scene.__init__)
 
     def capture(self, include_feature=False):
         if include_feature:
@@ -193,9 +199,8 @@ class GaussianModel:
         self.spatial_lr_scale = spatial_lr_scale
         # breakpoint()
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
-        fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
-        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
-        features[:, :3, 0 ] = fused_color
+        # Initialize features to zero (no color initialization from point cloud)
+        features = torch.zeros((fused_point_cloud.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
         features[:, 3:, 1:] = 0.0
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
@@ -217,6 +222,23 @@ class GaussianModel:
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
+        
+        # Initialize CoTracker control-point-driven mask if data is available
+        if hasattr(self, '_cotracker_data') and self._cotracker_data is not None:
+            from utils.cotracker_gaussian_utils import initialize_control_point_driven_mask
+            n_gaussians = fused_point_cloud.shape[0]
+            gaussian_control_point_indices = self._cotracker_data["gaussian_control_point_indices"]
+            self._is_control_point_driven = initialize_control_point_driven_mask(
+                n_gaussians, gaussian_control_point_indices
+            ).cuda()
+            
+            # Load precomputed positions (already torch tensor)
+            gaussian_positions_precomputed = self._cotracker_data["gaussian_positions_precomputed"]
+            self._control_point_positions_precomputed = gaussian_positions_precomputed.float().cuda()  # (T, N_gaussians, 3)
+            print(f"shape of self._control_point_positions_precomputed: {self._control_point_positions_precomputed.shape}")
+        else:
+            self._is_control_point_driven = None
+            self._control_point_positions_precomputed = None
     def training_setup(self, training_args,stage:Literal['coarse-base','coarse-lang','fine-base','fine-lang','fine-lang-discrete'],joint_train=False,no_dlang=False,init_from_stage='fine-lang',coarse_freeze_xyz=False):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -226,6 +248,13 @@ class GaussianModel:
         # Determine if xyz should be frozen (only in coarse stages when flag is set)
         # This allows training static appearance/features on a fixed geometry from high-quality depth initialization
         freeze_xyz = coarse_freeze_xyz and "coarse" in stage
+        
+        # Determine which Gaussians have optimizable xyz (not control-point-driven)
+        if self._is_control_point_driven is not None:
+            xyz_optimizable_mask = ~self._is_control_point_driven  # Inverse: True for optimizable, False for control-point-driven
+        else:
+            # If no CoTracker data, all Gaussians are optimizable
+            xyz_optimizable_mask = torch.ones(self._xyz.shape[0], dtype=torch.bool, device="cuda")
 
         if training_args.include_feature and ("lang" in stage):
             if 'discrete' in stage and self._language_feature.shape[-1]==int(os.getenv("language_feature_hiddendim",3)):
@@ -240,8 +269,10 @@ class GaussianModel:
             print(f"training_args.language_feature_lr:{training_args.language_feature_lr}")
             if joint_train:
                 l = []
-                # Only optimize xyz if not frozen
-                if not freeze_xyz:
+                # Only optimize xyz if not frozen AND if Gaussian is optimizable (not control-point-driven)
+                if not freeze_xyz and xyz_optimizable_mask.any():
+                    # For control-point-driven Gaussians, xyz is not optimized
+                    # We still add _xyz to optimizer but will set requires_grad=False for control-point-driven ones
                     l.append({'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"})
                 l.extend([
                     {'params': [self._features_dc], 'lr': training_args.feature_lr, "name": "f_dc"},
@@ -297,6 +328,7 @@ class GaussianModel:
                 )
             
             # Set requires_grad for all parameters
+            # Control-point-driven Gaussians: xyz gradients are stopped in renderer by replacing with detached positions
             self._xyz.requires_grad_(not freeze_xyz)
             self._deformation.requires_grad_(True)
 

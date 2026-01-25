@@ -123,9 +123,32 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         else:
             pc._deformation.deformation_net.args.no_dlang = args.no_dlang
 
+        # Apply deformation to all Gaussians
         means3D_final, scales_final, rotations_final, opacity_final, shs_final, language_feature_precomp_final, coff = pc._deformation(means3D, scales, 
-                                                                 rotations, opacity, shs, language_feature_precomp,
-                                                                 time)
+                                                             rotations, opacity, shs, language_feature_precomp,
+                                                             time)
+        
+        # Replace positions for control-point-driven Gaussians with precomputed positions
+        # (precomputed positions are already final, so no deformation should be applied to them)
+        if pc._is_control_point_driven is not None and pc._control_point_positions_precomputed is not None:
+            # Convert normalized time (0-1) to frame index
+            time_value = time[0, 0].item()
+            frame_idx = int(time_value * (pc._num_frames - 1))
+            frame_idx = max(0, min(frame_idx, pc._num_frames - 1))
+            
+            # Get precomputed positions for this frame
+            control_point_positions_full = pc._control_point_positions_precomputed[frame_idx]  # (N_gaussians, 3)
+            
+            # Ensure shapes match - precomputed positions should have positions for all Gaussians
+            assert control_point_positions_full.shape[0] == means3D_final.shape[0], \
+                f"Mismatch: control_point_positions_full has {control_point_positions_full.shape[0]} positions, " \
+                f"but means3D_final has {means3D_final.shape[0]} Gaussians"
+            
+            # Replace means3D_final for control-point-driven Gaussians with precomputed positions
+            # Use detach() to stop gradients from flowing back
+            means3D_final = means3D_final.clone()  # Clone to avoid in-place modification
+            means3D_final[pc._is_control_point_driven] = control_point_positions_full[pc._is_control_point_driven].detach()
+        
         # # import pdb; pdb.set_trace()
         # n = 100
         # language_feature_precomp_final = []
@@ -244,8 +267,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "visibility_filter" : radii > 0,
             "radii": radii,
             "depth":depth,
-            "coff":coff}
+            "coff":coff,
+            }
 
+# TODO: remove?
 def render_opacity(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, opt, scaling_modifier = 1.0, override_color = None, stage='fine-lang', cam_type=None,args=None):
     """
     Render the scene. 

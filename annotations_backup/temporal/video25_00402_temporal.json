@@ -8,7 +8,7 @@
     {
       "query_id": "video25_00402_q1",
       "query_type": "action_onset",
-      "question": "When does one of the graspers first let go of the gallbladder?",
+      "question": "top grasper letting go of the gallbladder",
       "answer_format": "Timestep X",
       "ground_truth": {
         "frame": 11
@@ -18,7 +18,7 @@
     {
       "query_id": "video25_00402_q2",
       "query_type": "action_duration",
-      "question": "During which timesteps are both graspers grasping the gallbladder?",
+      "question": "both graspers holding the gallbladder",
       "answer_format": "Timesteps X-Y (or multiple ranges: X-Y, A-B)",
       "ground_truth": {
         "ranges": [

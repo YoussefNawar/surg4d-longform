@@ -9,9 +9,10 @@ install-simple-knn = "python -m pip install --no-build-isolation -e submodules/s
 install-rasterization = "python -m pip install --no-build-isolation -e submodules/4d-langsplat-rasterization/"
 install-deva = "python -m pip install -e submodules/4d-langsplat-tracking-anything-with-deva/"
 install-segment-anything = "python -m pip install git+https://github.com/facebookresearch/segment-anything.git"
-install-vipe = "python -m pip install --no-build-isolation submodules/vipe/"
 install-depth-anything-3 = "python -m pip install submodules/depth-anything-3/"
-setup = { depends-on = ["install-simple-knn", "install-rasterization", "install-deva", "install-segment-anything", "install-vipe", "install-depth-anything-3"] }
+install-cotracker = "python -m pip install git+https://github.com/facebookresearch/co-tracker.git"
+download-cotracker-checkpoint = "mkdir -p checkpoints && wget -O checkpoints/cotracker3_scaled_offline.pth https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth || curl -L -o checkpoints/cotracker3_scaled_offline.pth https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth"
+setup = { depends-on = ["install-simple-knn", "install-rasterization", "install-deva", "install-segment-anything", "install-depth-anything-3", "install-cotracker", "download-cotracker-checkpoint"] }
 # run pixi run setup after pixi install to install cuda extensions
 
 [activation.env]
@@ -19,8 +20,8 @@ setup = { depends-on = ["install-simple-knn", "install-rasterization", "install-
 LD_LIBRARY_PATH = "$PIXI_PROJECT_ROOT/.pixi/envs/default/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH"
 # ignore ~/.local packages in case someone accidentally installed stuff with system python
 PYTHONNOUSERSITE = "1"
-# use gpu 1 on a4000-2402n18 (t's machine)
-# CUDA_VISIBLE_DEVICES = "$(if [ $(hostname) = 'a4000-2402n18' ]; then echo '1'; fi)"
+# CUDA_DEVICE_ORDER ensures GPU numbering matches nvidia-smi
+CUDA_DEVICE_ORDER = "PCI_BUS_ID"
 TOKENIZERS_PARALLELISM="false"
 
 [dependencies]
@@ -78,4 +79,6 @@ openexr-numpy = ">=0.0.8, <0.0.9"
 scikit-learn = ">=1.7.2, <2"
 rich = ">=14.2.0, <15"
 xformers = ">=0.0.29.post3, <0.0.30"
+moviepy = ">=1.0.3, <2"
+flow-vis = "*"
 

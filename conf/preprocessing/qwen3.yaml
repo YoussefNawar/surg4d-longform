@@ -23,13 +23,18 @@ vipe_pc_single_depth_use_instance_count: false # prioritize frames with more ins
 vipe_depth_step: 16 # stride for depth maps that end up in pointclouds, only used if pc_single_depth_projection is false and vipe_slam_map is false
 
 # depth anything v3 settings
-da3_pc_frame_number: 40
+# Point cloud is now initialized from first, middle, and last frames (hardcoded in preprocess.py)
 da3_visualize: true
 da3_conf_thresh_percentile: 0.0
 da3_pc_pixel_stride: 3 # stride for subsampling point cloud pixels (e.g., 3 = every 3rd pixel = 1/9 points)
+# TODO: fix bug: setting this != 1 messes with the graph extraction
+da3_densify_ratio: 1 # densification ratio: multiply points by this factor (copies with noise)
 
 verbose_output: false # keep intermediate output files (mostly vipe)
 pc_ply_visualization_filename: pointcloud_viz.ply # set to None to disable
 
 # instance mask conversion
 min_component_area: 5 # minimum area of a component to be considered an instance
+
+# CoTracker3 settings
+cotracker_grid_size: 32 # control point grid size (grid_size x grid_size)

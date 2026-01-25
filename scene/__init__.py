@@ -82,6 +82,16 @@ class Scene:
             # breakpoint()
             scene_info = scene_info._replace(point_cloud=add_points(scene_info.point_cloud, xyz_max=xyz_max, xyz_min=xyz_min))
         self.gaussians._deformation.deformation_net.set_aabb(xyz_max,xyz_min)
+        
+        # Load CoTracker data if available
+        from utils.cotracker_gaussian_utils import load_cotracker_data
+        from pathlib import Path
+        cotracker_data = load_cotracker_data(Path(args.source_path))
+        if cotracker_data is not None:
+            self.gaussians._cotracker_data = cotracker_data
+            # Store number of frames for time-to-frame conversion
+            self.gaussians._num_frames = cotracker_data["gaussian_positions_precomputed"].shape[0]
+        
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                             "point_cloud",
@@ -91,6 +101,18 @@ class Scene:
                                                         "point_cloud",
                                                         f"{load_stage}_iteration_" + str(self.loaded_iter),
                                                     ))
+            # Initialize CoTracker control-point-driven mask if data is available (same as create_from_pcd)
+            if cotracker_data is not None:
+                from utils.cotracker_gaussian_utils import initialize_control_point_driven_mask
+                n_gaussians = self.gaussians.get_xyz.shape[0]
+                gaussian_control_point_indices = cotracker_data["gaussian_control_point_indices"]
+                self.gaussians._is_control_point_driven = initialize_control_point_driven_mask(
+                    n_gaussians, gaussian_control_point_indices
+                ).cuda()
+                
+                # Load precomputed positions (already torch tensor)
+                gaussian_positions_precomputed = cotracker_data["gaussian_positions_precomputed"]
+                self.gaussians._control_point_positions_precomputed = gaussian_positions_precomputed.float().cuda()  # (T, N_gaussians, 3)
 
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, self.maxtime)

@@ -1146,6 +1146,9 @@ def graph_agent_predict_query_list(
     point_n2o: Callable[[np.ndarray], np.ndarray],
     max_iterations: int = 10,
     tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
+    graph_tools: Optional[Any] = None,
+    tool_viz_dir: Optional[Path] = None,
+    query_type: str = "objects",
 ):
     """Use prompt_graph_agent with tools to predict a 3D point per query.
 
@@ -1159,9 +1162,19 @@ def graph_agent_predict_query_list(
         int(frame_number), train_cameras, frame_name
     )
 
-    for query in queries_list:
+    for query_idx, query in enumerate(queries_list):
         substring = query["query"]
         question = prompt_template.format(substring=substring)
+        
+        # Start recording if tool visualization is enabled
+        if tool_viz_dir is not None and graph_tools is not None:
+            # Sanitize query text for filename
+            sanitized_query = re.sub(r'[^\w\s-]', '', substring)  # Remove special chars
+            sanitized_query = re.sub(r'\s+', '_', sanitized_query)  # Replace whitespace with _
+            sanitized_query = sanitized_query[:50]  # Limit length
+            rrd_filename = f"t{timestep_idx:03d}_{query_type}_{query_idx:02d}_{sanitized_query}.rrd"
+            rrd_file = tool_viz_dir / rrd_filename
+            graph_tools.start_recording(str(rrd_file))
 
         # Call Qwen agent with the graph at this specific timestep
         agent_result = prompt_graph_agent(
@@ -1186,6 +1199,10 @@ def graph_agent_predict_query_list(
         sanitized_tool_calls = sanitize_tool_calls(agent_result.get("tool_calls", []))
         message_history = agent_result.get("message_history", [])
         if point3d is None:
+            # Stop recording if tool visualization is enabled (failed prediction)
+            if tool_viz_dir is not None and graph_tools is not None:
+                graph_tools.stop_recording()
+            
             # 3D failure: fall back to 2D corner pixel (0,0), omit 3D position to avoid skew
             out_item = {
                 "query": substring,
@@ -1204,6 +1221,15 @@ def graph_agent_predict_query_list(
         # Project to pixel coords - convert normalized point back to original coords first
         pos_arr = np.array(point3d, dtype=np.float32).reshape(1, 3)
         pos_arr_original = point_n2o(pos_arr)
+        
+        # Log final prediction to rerun before stopping recording
+        if tool_viz_dir is not None and graph_tools is not None:
+            graph_tools.log_final_prediction(
+                position=pos_arr_original,
+                timestep_idx=timestep_idx,
+                label=substring,
+            )
+            graph_tools.stop_recording()
         pixels = project_3d_to_2d(pos_arr_original, proj_matrix, img_width, img_height)
 
         out_item = {
@@ -1267,8 +1293,11 @@ def graph_agent_feat_queries(
     node_extents_norm = distance_o2n(node_extents)
 
     # Load autoencoder for inspect_highres_node_at_time tool
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-    autoencoder_path = clip_dir / cfg.eval.spatial.graph_agent_autoencoder_checkpoint_subdir / "best_ckpt.pth"
+    if cfg.eval.spatial.graph_agent_use_global_autoencoder:
+        autoencoder_path = Path(cfg.preprocessed_root) / cfg.eval.spatial.graph_agent_global_autoencoder_checkpoint_dir / "best_ckpt.pth"
+    else:
+        clip_dir = Path(cfg.preprocessed_root) / clip.name
+        autoencoder_path = clip_dir / cfg.eval.spatial.graph_agent_autoencoder_checkpoint_subdir / "best_ckpt.pth"
     autoencoder = QwenAutoencoder(
         input_dim=cfg.eval.spatial.graph_agent_autoencoder_full_dim,
         latent_dim=cfg.eval.spatial.graph_agent_autoencoder_latent_dim,
@@ -1291,6 +1320,13 @@ def graph_agent_feat_queries(
         patch_latents_through_time=patch_latents_through_time,
         autoencoder=autoencoder,
     )
+
+    # Setup tool visualization directory if configured
+    tool_viz_enabled = cfg.eval.spatial.tool_viz_dir is not None
+    tool_viz_dir = None
+    if tool_viz_enabled:
+        tool_viz_dir = Path(cfg.eval.spatial.tool_viz_dir) / clip.name
+        tool_viz_dir.mkdir(parents=True, exist_ok=True)
 
     # Parse graph_agent_tools config (objects with name and max_calls)
     tool_names = []
@@ -1343,6 +1379,9 @@ def graph_agent_feat_queries(
             point_n2o=point_n2o,
             max_iterations=max_iterations,
             tool_call_limits=tool_call_limits,
+            graph_tools=graph_tools,
+            tool_viz_dir=tool_viz_dir,
+            query_type="objects",
         )
 
         results[timestep]["actions"] = graph_agent_predict_query_list(
@@ -1362,6 +1401,9 @@ def graph_agent_feat_queries(
             point_n2o=point_n2o,
             max_iterations=max_iterations,
             tool_call_limits=tool_call_limits,
+            graph_tools=graph_tools,
+            tool_viz_dir=tool_viz_dir,
+            query_type="actions",
         )
 
         # Clear VRAM after each timestep to prevent OOM
@@ -1511,14 +1553,12 @@ def frame_attn_refine_predict_query_list(
                 ]
             question = question + "\n\n" + "\n".join(lines)
 
-        # Ask normal Qwen with the image
         response = ask_qwen_about_image(
             image=image,
             prompt=question,
             model=model,
             processor=processor,
             system_prompt=system_prompt_refine,
-            max_tokens=5012,
         )
 
         px = _parse_pixel_from_json(
@@ -1697,7 +1737,6 @@ def frame_direct_predict_query_list(
             model=model,
             processor=processor,
             system_prompt=system_prompt,
-            max_tokens=5012,
         )
 
         px = _parse_pixel_from_json(

@@ -8,7 +8,7 @@
     {
       "query_id": "video17_01803_q1",
       "query_type": "action_onset",
-      "question": "When does the grasper start grasping the gallbladder?",
+      "question": "grasper starting to squeeze the gallbladder",
       "answer_format": "Timestep X",
       "ground_truth": {
         "frame": 5
@@ -18,13 +18,13 @@
     {
       "query_id": "video17_01803_q2",
       "query_type": "action_duration",
-      "question": "During which timesteps is tissue being grasped?",
+      "question": "grasper pulling the gallbladder upwards",
       "answer_format": "Timesteps X-Y (or multiple ranges: X-Y, A-B)",
       "ground_truth": {
         "ranges": [
           [
-            5,
-            19
+            9,
+            13
           ]
         ]
       },

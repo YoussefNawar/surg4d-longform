@@ -2,28 +2,16 @@ import json
 import torch
 import numpy as np
 from functools import partial
-from typing import Dict, Any, List, Callable, Tuple
+from typing import Dict, Any, List, Callable, Tuple, Optional
 from scipy.spatial import KDTree
+import rerun as rr
 
 from benchmark.graph_utils import get_coord_transformations
 from autoencoder.model_qwen import QwenAutoencoder
+from rerun_utils import _compute_scene_extent
 
 
 IMAGE_PLACEHOLDER = "<image/>"
-
-
-def timestep_to_seconds_str(timestep: int, fps: float) -> str:
-    """Convert timestep index to Qwen3 temporal format.
-    
-    Args:
-        timestep: Integer timestep index
-        fps: Frames per second
-        
-    Returns:
-        Formatted string like "<3.0 seconds>"
-    """
-    seconds = timestep / fps
-    return f"<{seconds:.1f} seconds>"
 
 
 # helpers
@@ -89,7 +77,7 @@ def node_distances_through_time(
     centroids: np.ndarray,
     node_id_1: int,
     node_id_2: int,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     n_timesteps = centroids.shape[0]
     n_nodes = centroids.shape[1]
@@ -119,9 +107,66 @@ def node_distances_through_time(
                 4,
             ),
         }
-        if fps is not None:
-            dist_entry["time"] = timestep_to_seconds_str(t, fps)
         distances.append(dist_entry)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_node_distances"
+        
+        # Get masks for the two nodes
+        mask1 = toolkit.clusters == node_id_1
+        mask2 = toolkit.clusters == node_id_2
+        
+        scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        for t in range(n_timesteps):
+            rr.set_time("timestep", sequence=t)
+            
+            # Log all points for both clusters with highlight colors
+            rr.log(
+                f"{prefix}/node_{node_id_1}",
+                rr.Points3D(
+                    positions=toolkit.positions[t][mask1],
+                    colors=[[255, 0, 0]],
+                    radii=point_radius
+                )
+            )
+            rr.log(
+                f"{prefix}/node_{node_id_2}",
+                rr.Points3D(
+                    positions=toolkit.positions[t][mask2],
+                    colors=[[0, 0, 255]],
+                    radii=point_radius
+                )
+            )
+            
+            # Log centroids and distance line
+            pos1 = toolkit.centroids[t, node_id_1]
+            pos2 = toolkit.centroids[t, node_id_2]
+            midpoint = (pos1 + pos2) / 2
+            dist = distances[t]["distance"]
+            
+            rr.log(
+                f"{prefix}/distance_marker",
+                rr.Points3D(
+                    positions=[midpoint],
+                    colors=[[0, 255, 0]],
+                    radii=point_radius * 1.5,
+                    labels=[f"d={dist:.3f}"],
+                    show_labels=True,
+                )
+            )
+            
+            rr.log(
+                f"{prefix}/connection",
+                rr.LineStrips3D(
+                    strips=[[pos1, pos2]],
+                    colors=[[128, 128, 128]],
+                    radii=[point_radius * 0.5],
+                )
+            )
 
     return {
         "text": json.dumps(
@@ -161,7 +206,7 @@ def node_overlap_scores_through_time(
     bhattacharyya_coeffs: np.ndarray,
     node_id_1: int,
     node_id_2: int,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     """Return the Bhattacharyya coefficients (overlap scores) between two nodes through time.
 
@@ -169,7 +214,7 @@ def node_overlap_scores_through_time(
         bhattacharyya_coeffs: Dense Bhattacharyya coefficients (T, n_clusters, n_clusters)
         node_id_1: First node id
         node_id_2: Second node id
-        fps: Optional frames per second. If provided, uses seconds format instead of timestep.
+        toolkit: Optional GraphTools instance for rerun logging
 
     Returns:
         Dict with overlap scores at all timesteps.
@@ -199,9 +244,61 @@ def node_overlap_scores_through_time(
                 float(bhattacharyya_coeffs[t, node_id_1, node_id_2]), 4
             ),
         }
-        if fps is not None:
-            score_entry["time"] = timestep_to_seconds_str(t, fps)
         overlap_scores.append(score_entry)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_node_overlap_scores"
+        
+        # Get masks for the two nodes
+        mask1 = toolkit.clusters == node_id_1
+        mask2 = toolkit.clusters == node_id_2
+        
+        scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        for t in range(n_timesteps):
+            rr.set_time("timestep", sequence=t)
+            
+            score = overlap_scores[t]["overlap_score"]
+            
+            # Color-code nodes based on overlap score (red = low, green = high)
+            color_val = int(score * 255)
+            node_color = [255 - color_val, color_val, 0]
+            
+            # Log all points for both clusters with color-coded overlap
+            rr.log(
+                f"{prefix}/node_{node_id_1}",
+                rr.Points3D(
+                    positions=toolkit.positions[t][mask1],
+                    colors=[node_color],
+                    radii=point_radius,
+                )
+            )
+            rr.log(
+                f"{prefix}/node_{node_id_2}",
+                rr.Points3D(
+                    positions=toolkit.positions[t][mask2],
+                    colors=[node_color],
+                    radii=point_radius,
+                )
+            )
+            
+            # Log overlap score as text at midpoint
+            pos1 = toolkit.centroids[t, node_id_1]
+            pos2 = toolkit.centroids[t, node_id_2]
+            midpoint = (pos1 + pos2) / 2
+            rr.log(
+                f"{prefix}/score_marker",
+                rr.Points3D(
+                    positions=[midpoint],
+                    colors=[[255, 255, 0]],
+                    radii=point_radius * 1.5,
+                    labels=[f"overlap={score:.3f}"],
+                    show_labels=True,
+                )
+            )
 
     return {
         "text": json.dumps(
@@ -248,7 +345,7 @@ def node_overlap_position_at_time(
     node_id_1: int,
     node_id_2: int,
     timestep: int,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     n_timesteps = centroids.shape[0]
     n_nodes = centroids.shape[1]
@@ -305,9 +402,47 @@ def node_overlap_position_at_time(
         "timestep": int(timestep),
         "point": [round(float(p), 4) for p in contact_point],
     }
-    
-    if fps is not None:
-        result["time"] = timestep_to_seconds_str(timestep, fps)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_overlap_position"
+        
+        rr.set_time("timestep", sequence=timestep)
+        
+        # Use original coordinates for visualization
+        mask1 = toolkit.clusters == node_id_1
+        mask2 = toolkit.clusters == node_id_2
+        pos1_orig = toolkit.positions[timestep, mask1]
+        pos2_orig = toolkit.positions[timestep, mask2]
+        
+        scene_extent = _compute_scene_extent(toolkit.positions[timestep])
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        # Log both nodes
+        rr.log(
+            f"{prefix}/node_{node_id_1}",
+            rr.Points3D(positions=pos1_orig, colors=[[255, 0, 0]], radii=point_radius)
+        )
+        rr.log(
+            f"{prefix}/node_{node_id_2}",
+            rr.Points3D(positions=pos2_orig, colors=[[0, 0, 255]], radii=point_radius)
+        )
+        
+        # Convert contact point back to original coordinates
+        contact_point_orig = toolkit.point_n2o(contact_point.reshape(1, 3))[0]
+        
+        # Log overlap position marker (larger, bright color)
+        rr.log(
+            f"{prefix}/overlap_position",
+            rr.Points3D(
+                positions=[contact_point_orig],
+                colors=[[0, 255, 0]],
+                radii=point_radius * 3,
+                labels=["overlap"],
+                show_labels=True,
+            )
+        )
 
     return {"text": json.dumps(result)}
 
@@ -341,7 +476,7 @@ def inspect_highres_node_at_time(
     autoencoder: QwenAutoencoder,
     node_id: int,
     timestep: int,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     """Decode and return all gaussian features for a node at a timestep.
 
@@ -351,7 +486,7 @@ def inspect_highres_node_at_time(
         autoencoder: QwenAutoencoder to decode latents to full features
         node_id: The node/cluster id to inspect
         timestep: The timestep to inspect
-        fps: Optional frames per second. If provided, uses seconds format instead of timestep.
+        toolkit: Optional GraphTools instance for rerun logging
 
     Returns:
         Dict with "text" and "vision_features" for the node.
@@ -399,9 +534,30 @@ def inspect_highres_node_at_time(
         "n_gaussians": min(MAX_GAUSSIANS_PER_CLUSTER, latents.shape[0]),
         "detailed_view": IMAGE_PLACEHOLDER,
     }
-    
-    if fps is not None:
-        result["time"] = timestep_to_seconds_str(timestep, fps)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_highres_node"
+        
+        rr.set_time("timestep", sequence=timestep)
+        
+        # Just highlight the cluster - same approach as other tools
+        node_mask = toolkit.clusters == node_id
+        node_positions = toolkit.positions[timestep, node_mask]
+        
+        scene_extent = _compute_scene_extent(toolkit.positions[timestep])
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        # Log the node points
+        rr.log(
+            f"{prefix}/node_{node_id}",
+            rr.Points3D(
+                positions=node_positions,
+                colors=[[255, 200, 0]],
+                radii=point_radius,
+            )
+        )
 
     return {
         "text": json.dumps(result),
@@ -434,7 +590,7 @@ def inspect_node_through_time(
     centers: np.ndarray,
     extents: np.ndarray,
     node_id: int,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     """Return lowres visual descriptors and properties for a node through all timesteps.
 
@@ -444,7 +600,7 @@ def inspect_node_through_time(
         centers: Cluster centers through time (T, n_clusters, 3)
         extents: Cluster extents through time (T, n_clusters, 3)
         node_id: The node/cluster id to inspect
-        fps: Optional frames per second. If provided, uses seconds format instead of timestep.
+        toolkit: Optional GraphTools instance for rerun logging
 
     Returns:
         Dict with "text" (JSON) and "vision_features" for the node through all timesteps.
@@ -478,7 +634,7 @@ def inspect_node_through_time(
 
         entry = {
             "timestep": int(t),
-            "lowres_visual_descriptor": IMAGE_PLACEHOLDER,
+            "rough_image": IMAGE_PLACEHOLDER,
             "centroid": {
                 "x": round(float(c[0]), 2),
                 "y": round(float(c[1]), 2),
@@ -495,14 +651,34 @@ def inspect_node_through_time(
                 "z": round(float(ext[2]), 2),
             },
         }
-        
-        if fps is not None:
-            entry["time"] = timestep_to_seconds_str(t, fps)
-            
         timesteps_data.append(entry)
 
         # Add vision features for this timestep
         vision_features.append(torch.Tensor(node_features[t]))
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_node_through_time"
+        
+        # Get positions for this node through time
+        node_mask = toolkit.clusters == node_id
+        scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        for t in range(n_timesteps):
+            rr.set_time("timestep", sequence=t)
+            
+            node_positions = toolkit.positions[t, node_mask]
+            
+            rr.log(
+                f"{prefix}/node_{node_id}",
+                rr.Points3D(
+                    positions=node_positions,
+                    colors=[[100, 200, 255]],
+                    radii=point_radius,
+                )
+            )
 
     return {
         "text": json.dumps({
@@ -538,7 +714,7 @@ def inspect_scene_at_time(
     centers: np.ndarray,
     extents: np.ndarray,
     timestep: int,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     """Return the complete scene state at a given timestep.
 
@@ -548,7 +724,7 @@ def inspect_scene_at_time(
         centers: Cluster centers through time (T, n_clusters, 3)
         extents: Cluster extents through time (T, n_clusters, 3)
         timestep: The timestep to inspect
-        fps: Optional frames per second. If provided, uses seconds format instead of timestep.
+        toolkit: Optional GraphTools instance for rerun logging
 
     Returns:
         Dict with "text" (JSON) and "vision_features" for all nodes at the timestep.
@@ -579,7 +755,7 @@ def inspect_scene_at_time(
 
         nodes_data.append({
             "node_id": int(n),
-            "lowres_visual_descriptor": IMAGE_PLACEHOLDER,
+            "rough_image": IMAGE_PLACEHOLDER,
             "centroid": {
                 "x": round(float(c[0]), 2),
                 "y": round(float(c[1]), 2),
@@ -604,9 +780,67 @@ def inspect_scene_at_time(
         "timestep": int(timestep),
         "nodes": nodes_data,
     }
-    
-    if fps is not None:
-        result["time"] = timestep_to_seconds_str(timestep, fps)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_scene_at_time"
+        
+        rr.set_time("timestep", sequence=timestep)
+        
+        # Log graph edges at this timestep (use original coordinates)
+        A = toolkit.adjacency[timestep]
+        edge_indices = np.where(A > 0)
+        
+        if len(edge_indices[0]) > 0:
+            edge_weights = A[edge_indices]
+            scene_extent = _compute_scene_extent(toolkit.centroids[timestep])
+            
+            # Normalize weights for visualization
+            if len(edge_weights) > 1:
+                min_weight = edge_weights.min()
+                max_weight = edge_weights.max()
+                if max_weight > min_weight:
+                    normalized_weights = (edge_weights - min_weight) / (max_weight - min_weight)
+                else:
+                    normalized_weights = np.ones_like(edge_weights)
+            else:
+                normalized_weights = np.ones_like(edge_weights)
+            
+            # Log edges
+            for idx, (u, v) in enumerate(zip(edge_indices[0], edge_indices[1])):
+                if u < v:  # Avoid duplicate edges for symmetric adjacency
+                    start_pos = toolkit.centroids[timestep, u]
+                    end_pos = toolkit.centroids[timestep, v]
+                    weight = normalized_weights[idx]
+                    
+                    color = [0, 0, 0]
+                    thickness = max(scene_extent * (0.002 + 0.008 * weight), 1e-5)
+                    
+                    rr.log(
+                        f"{prefix}/edges/edge_{idx}",
+                        rr.LineStrips3D(
+                            strips=[[start_pos, end_pos]],
+                            colors=[color],
+                            radii=[thickness],
+                        )
+                    )
+        
+        # Log all nodes at this timestep
+        scene_extent = _compute_scene_extent(toolkit.positions[timestep])
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        for node_id in range(n_nodes):
+            node_mask = toolkit.clusters == node_id
+            node_positions = toolkit.positions[timestep, node_mask]
+            
+            rr.log(
+                f"{prefix}/nodes/{node_id}",
+                rr.Points3D(
+                    positions=node_positions,
+                    radii=point_radius,
+                )
+            )
 
     return {
         "text": json.dumps(result),
@@ -644,7 +878,7 @@ def voxelize_scene(
     autoencoder: QwenAutoencoder,
     timestep: int,
     bbox: List[float] = None,
-    fps: float = None,
+    toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
     """Sample the scene at regular 3D spatial locations with visual descriptors per location.
 
@@ -664,11 +898,12 @@ def voxelize_scene(
               If None, samples the entire scene.
               NOTE: This format corresponds to Omni3D bbox format without rotation,
               which Qwen3 was trained on - important for paper justification.
-        fps: Optional frames per second. If provided, uses seconds format instead of timestep.
+        toolkit: Optional GraphTools instance for rerun logging
 
     Returns:
         Dict with "text" (JSON description) and "vision_features" (one tensor per non-empty sample).
-        Text contains sample metadata (bbox, content_density, grid index).
+        Text contains sample metadata (voxel_index, bbox, content_density, grid index).
+        voxel_index is a 3D tuple (i, j, k) indicating the voxel's position in the grid.
         Vision features are visual descriptors for scene content at each sampled location.
         Only non-empty voxels are included in the output.
     """
@@ -719,6 +954,8 @@ def voxelize_scene(
     # Build output - iterate over all voxels, skip empty ones
     voxels_data = []
     vision_features = []
+    voxel_centers_for_logging = []
+    voxel_indices_for_logging = []
 
     for i in range(GRID_SIZE):
         for j in range(GRID_SIZE):
@@ -744,18 +981,20 @@ def voxelize_scene(
                 # Store sample metadata
                 voxels_data.append(
                     {
+                        "voxel_index": [int(i), int(j), int(k)],
                         "bbox": [round(float(x), 2) for x in voxel_center]
                         + [round(float(x), 2) for x in voxel_size],
                         "visual_descriptor": IMAGE_PLACEHOLDER,
                     }
                 )
                 vision_features.append(voxel_visual_descriptor)
+                voxel_centers_for_logging.append(voxel_center)
+                voxel_indices_for_logging.append(voxel_idx)
 
     if len(voxels_data) == 0:
-        time_ref = timestep_to_seconds_str(timestep, fps) if fps is not None else f"timestep {timestep}"
         return {
             "text": json.dumps(
-                {"error": f"No voxels containing scene content found for {time_ref} and bbox {bbox} - are you sure the bbox is sensible?"}
+                {"error": f"No voxels containing scene content found for timestep {timestep} and bbox {bbox} - are you sure the bbox is sensible?"}
             )
         }
 
@@ -767,9 +1006,127 @@ def voxelize_scene(
         else None,
         "voxels": voxels_data,
     }
-    
-    if fps is not None:
-        response_data["time"] = timestep_to_seconds_str(timestep, fps)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_voxelize_scene"
+        
+        rr.set_time("timestep", sequence=timestep)
+        
+        # Recompute grid in ORIGINAL coordinates for visualization
+        pos_t_orig = toolkit.positions[timestep]
+        
+        # Determine bounding box for visualization (original coordinates)
+        if bbox is None:
+            min_coords_orig = pos_t_orig.min(axis=0)
+            max_coords_orig = pos_t_orig.max(axis=0)
+            bbox_center_orig = (min_coords_orig + max_coords_orig) / 2
+            bbox_size_orig = max_coords_orig - min_coords_orig
+        else:
+            # Convert bbox from normalized to original coordinates
+            # Transform the min and max corners instead of center/size separately
+            bbox_center_norm = np.array(bbox[:3])
+            bbox_size_norm = np.array(bbox[3:])
+            bbox_min_norm = bbox_center_norm - bbox_size_norm / 2
+            bbox_max_norm = bbox_center_norm + bbox_size_norm / 2
+            bbox_min_orig = toolkit.point_n2o(bbox_min_norm.reshape(1, 3))[0]
+            bbox_max_orig = toolkit.point_n2o(bbox_max_norm.reshape(1, 3))[0]
+            bbox_center_orig = (bbox_min_orig + bbox_max_orig) / 2
+            bbox_size_orig = bbox_max_orig - bbox_min_orig
+        
+        voxel_size_orig = bbox_size_orig / GRID_SIZE
+        grid_min_orig = bbox_center_orig - bbox_size_orig / 2
+        
+        scene_extent = _compute_scene_extent(pos_t_orig)
+        voxel_marker_radius = max(scene_extent * 0.005, 1e-5)  # Smaller markers
+        thin_line_radius = max(scene_extent * 0.001, 1e-6)  # Very thin lines
+        
+        # Log voxel centers and wireframes for occupied voxels
+        for voxel_idx in voxel_indices_for_logging:
+            i, j, k = voxel_idx
+            
+            # Compute voxel position in original coordinates
+            voxel_center_orig = grid_min_orig + (np.array([i, j, k]) + 0.5) * voxel_size_orig
+            
+            # Log center point with label (show only on hover)
+            rr.log(
+                f"{prefix}/voxels/{i}_{j}_{k}/center",
+                rr.Points3D(
+                    positions=[voxel_center_orig],
+                    colors=[[200, 100, 200]],
+                    radii=voxel_marker_radius,
+                    labels=[f"({i},{j},{k})"],
+                    show_labels=False,  # Only show on hover
+                )
+            )
+            
+            # Compute voxel corners in original coordinates
+            voxel_min_orig = grid_min_orig + np.array([i, j, k]) * voxel_size_orig
+            voxel_max_orig = voxel_min_orig + voxel_size_orig
+            
+            # Create 12 edges for this voxel's wireframe
+            voxel_edges = [
+                # Bottom face (z=min)
+                [voxel_min_orig, [voxel_max_orig[0], voxel_min_orig[1], voxel_min_orig[2]]],
+                [[voxel_max_orig[0], voxel_min_orig[1], voxel_min_orig[2]], [voxel_max_orig[0], voxel_max_orig[1], voxel_min_orig[2]]],
+                [[voxel_max_orig[0], voxel_max_orig[1], voxel_min_orig[2]], [voxel_min_orig[0], voxel_max_orig[1], voxel_min_orig[2]]],
+                [[voxel_min_orig[0], voxel_max_orig[1], voxel_min_orig[2]], voxel_min_orig],
+                # Top face (z=max)
+                [[voxel_min_orig[0], voxel_min_orig[1], voxel_max_orig[2]], [voxel_max_orig[0], voxel_min_orig[1], voxel_max_orig[2]]],
+                [[voxel_max_orig[0], voxel_min_orig[1], voxel_max_orig[2]], voxel_max_orig],
+                [voxel_max_orig, [voxel_min_orig[0], voxel_max_orig[1], voxel_max_orig[2]]],
+                [[voxel_min_orig[0], voxel_max_orig[1], voxel_max_orig[2]], [voxel_min_orig[0], voxel_min_orig[1], voxel_max_orig[2]]],
+                # Vertical edges
+                [voxel_min_orig, [voxel_min_orig[0], voxel_min_orig[1], voxel_max_orig[2]]],
+                [[voxel_max_orig[0], voxel_min_orig[1], voxel_min_orig[2]], [voxel_max_orig[0], voxel_min_orig[1], voxel_max_orig[2]]],
+                [[voxel_max_orig[0], voxel_max_orig[1], voxel_min_orig[2]], voxel_max_orig],
+                [[voxel_min_orig[0], voxel_max_orig[1], voxel_min_orig[2]], [voxel_min_orig[0], voxel_max_orig[1], voxel_max_orig[2]]],
+            ]
+            
+            # Log all edges for this voxel
+            for edge_idx, edge in enumerate(voxel_edges):
+                rr.log(
+                    f"{prefix}/voxels/{i}_{j}_{k}/edges/edge_{edge_idx}",
+                    rr.LineStrips3D(
+                        strips=[edge],
+                        colors=[[150, 150, 200]],  # Light blue/purple
+                        radii=[thin_line_radius],
+                    )
+                )
+        
+        # Log grid bounding box in original coordinates
+        bbox_min_orig = grid_min_orig
+        bbox_max_orig = grid_min_orig + np.array([GRID_SIZE, GRID_SIZE, GRID_SIZE]) * voxel_size_orig
+        
+        # Create 12 edges of the bounding box
+        edges = [
+            # Bottom face
+            [bbox_min_orig, [bbox_max_orig[0], bbox_min_orig[1], bbox_min_orig[2]]],
+            [[bbox_max_orig[0], bbox_min_orig[1], bbox_min_orig[2]], [bbox_max_orig[0], bbox_max_orig[1], bbox_min_orig[2]]],
+            [[bbox_max_orig[0], bbox_max_orig[1], bbox_min_orig[2]], [bbox_min_orig[0], bbox_max_orig[1], bbox_min_orig[2]]],
+            [[bbox_min_orig[0], bbox_max_orig[1], bbox_min_orig[2]], bbox_min_orig],
+            # Top face
+            [[bbox_min_orig[0], bbox_min_orig[1], bbox_max_orig[2]], [bbox_max_orig[0], bbox_min_orig[1], bbox_max_orig[2]]],
+            [[bbox_max_orig[0], bbox_min_orig[1], bbox_max_orig[2]], bbox_max_orig],
+            [bbox_max_orig, [bbox_min_orig[0], bbox_max_orig[1], bbox_max_orig[2]]],
+            [[bbox_min_orig[0], bbox_max_orig[1], bbox_max_orig[2]], [bbox_min_orig[0], bbox_min_orig[1], bbox_max_orig[2]]],
+            # Vertical edges
+            [bbox_min_orig, [bbox_min_orig[0], bbox_min_orig[1], bbox_max_orig[2]]],
+            [[bbox_max_orig[0], bbox_min_orig[1], bbox_min_orig[2]], [bbox_max_orig[0], bbox_min_orig[1], bbox_max_orig[2]]],
+            [[bbox_max_orig[0], bbox_max_orig[1], bbox_min_orig[2]], bbox_max_orig],
+            [[bbox_min_orig[0], bbox_max_orig[1], bbox_min_orig[2]], [bbox_min_orig[0], bbox_max_orig[1], bbox_max_orig[2]]],
+        ]
+        
+        for idx, edge in enumerate(edges):
+            rr.log(
+                f"{prefix}/grid_bbox/edge_{idx}",
+                rr.LineStrips3D(
+                    strips=[edge],
+                    colors=[[100, 100, 100]],
+                    radii=[voxel_marker_radius * 0.3],
+                )
+            )
 
     result = {"text": json.dumps(response_data, indent=2)}
     if vision_features:
@@ -798,7 +1155,6 @@ class GraphTools:
             Required for inspect_highres_node_at_time. Only available when store_verbose=True.
         autoencoder: QwenAutoencoder instance for decoding latent features.
             Required for inspect_highres_node_at_time.
-        fps: Optional frames per second. If provided, tools will report time in seconds format.
     """
 
     def __init__(
@@ -813,7 +1169,6 @@ class GraphTools:
         qwen_feats,
         patch_latents_through_time: np.ndarray,
         autoencoder: QwenAutoencoder,
-        fps: float = None,
     ):
         self.positions = positions
         self.clusters = clusters
@@ -825,10 +1180,94 @@ class GraphTools:
         self.qwen_feats = qwen_feats
         self.patch_latents_through_time = patch_latents_through_time
         self.autoencoder = autoencoder
-        self.fps = fps
 
         self.point_o2n, self.point_n2o, self.distance_o2n, self.distance_n2o = (
             get_coord_transformations(positions)
+        )
+        
+        # Tool call logging state
+        self.call_counter = 0
+        self.recording_active = False
+        self.rr = rr  # Store rerun instance for external logging access
+
+    def start_recording(self, rrd_file: str):
+        """Initialize rerun recording to the specified file and log initial graph state.
+        
+        Args:
+            rrd_file: Path to the .rrd file to save visualizations
+        """
+        self.call_counter = 0
+        self.recording_active = True
+        
+        # Initialize rerun and set output file
+        rr.init("tool_calls")
+        rr.save(rrd_file)
+        
+        # Log initial graph structure through all timesteps (use original coordinates)
+        n_timesteps = self.positions.shape[0]
+        scene_extent = _compute_scene_extent(self.positions.reshape(-1, 3))
+        point_radius = max(scene_extent * 0.005, 1e-5)
+        
+        for t in range(n_timesteps):
+            rr.set_time("timestep", sequence=t)
+            
+            for cluster_id in np.unique(self.clusters):
+                mask = self.clusters == cluster_id
+                rr.log(
+                    f"00_initial_graph/nodes/{cluster_id}",
+                    rr.Points3D(
+                        positions=self.positions[t][mask],
+                        radii=point_radius,
+                    ),
+                )
+    
+    def stop_recording(self):
+        """Stop recording and reset state."""
+        self.recording_active = False
+        self.call_counter = 0
+    
+    def increase_logging_tool_counter(self) -> int:
+        """Increment and return the tool call counter."""
+        self.call_counter += 1
+        return self.call_counter
+    
+    def log_final_prediction(
+        self,
+        position: np.ndarray,
+        timestep_idx: int,
+        label: str,
+        entity_name: str = "zz_final_prediction",
+    ):
+        """Log a final prediction point to the rerun trace.
+        
+        Args:
+            position: 3D position in original coordinates (1, 3) or (3,)
+            timestep_idx: Timestep index to log at
+            label: Label text to display with the point
+            entity_name: Entity name for the rerun log (default: "zz_final_prediction")
+        """
+        from rerun_utils import _compute_scene_extent
+        
+        # Ensure position is (1, 3) shape
+        pos_arr = np.array(position, dtype=np.float32).reshape(1, 3)
+        
+        # Set the timestep
+        self.rr.set_time("timestep", sequence=int(timestep_idx))
+        
+        # Compute appropriate point size based on scene extent
+        scene_extent = _compute_scene_extent(self.positions[timestep_idx])
+        point_radius = max(scene_extent * 0.025, 1e-4)  # Larger than tool points (0.008)
+        
+        # Log the final prediction as a big red point
+        self.rr.log(
+            entity_name,
+            self.rr.Points3D(
+                positions=pos_arr,
+                colors=[[255, 0, 0]],  # Bright red
+                radii=point_radius,
+                labels=[f"prediction: {label}"],
+                show_labels=True,
+            )
         )
 
     def get_all_tools(self) -> Dict[str, Tuple[Callable, Dict[str, Any]]]:
@@ -842,7 +1281,7 @@ class GraphTools:
                 partial(
                     node_distances_through_time,
                     centroids=self.point_o2n(self.centroids),
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_node_distances_through_time,
             ),
@@ -850,7 +1289,7 @@ class GraphTools:
                 partial(
                     node_overlap_scores_through_time,
                     bhattacharyya_coeffs=self.bhattacharyya_coeffs,
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_node_overlap_scores_through_time,
             ),
@@ -860,7 +1299,7 @@ class GraphTools:
                     positions=self.point_o2n(self.positions),
                     clusters=self.clusters,
                     centroids=self.point_o2n(self.centroids),
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_node_overlap_position_at_time,
             ),
@@ -870,7 +1309,7 @@ class GraphTools:
                     patch_latents_through_time=self.patch_latents_through_time,
                     clusters=self.clusters,
                     autoencoder=self.autoencoder,
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_inspect_highres_node_at_time,
             ),
@@ -881,7 +1320,7 @@ class GraphTools:
                     centroids=self.point_o2n(self.centroids),
                     centers=self.point_o2n(self.centers),
                     extents=self.distance_o2n(self.extents),
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_inspect_node_through_time,
             ),
@@ -892,7 +1331,7 @@ class GraphTools:
                     centroids=self.point_o2n(self.centroids),
                     centers=self.point_o2n(self.centers),
                     extents=self.distance_o2n(self.extents),
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_inspect_scene_at_time,
             ),
@@ -902,7 +1341,7 @@ class GraphTools:
                     positions=self.point_o2n(self.positions),
                     patch_latents_through_time=self.patch_latents_through_time,
                     autoencoder=self.autoencoder,
-                    fps=self.fps,
+                    toolkit=self,
                 ),
                 spec_voxelize_scene,
             ),

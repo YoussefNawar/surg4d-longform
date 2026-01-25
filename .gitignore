@@ -1,4 +1,5 @@
 output
+checkpoints
 autoencoder/ckpt
 data
 *.pyc
