@@ -221,7 +221,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # time2 = get_time()
     # print("asset value:",time2-time1)
-    scales_final = pc.scaling_activation(scales_final)
+    scales_final = pc.scaling_activation(scales_final).clamp(max=0.01)
     rotations_final = pc.rotation_activation(rotations_final)
     opacity = pc.opacity_activation(opacity_final)
     # print(opacity.max())

@@ -190,7 +190,7 @@ def track_control_points(
 
     # Visualize
     visualizer = Visualizer(save_dir=save_dir, pad_value=25)
-    visualizer.visualize(video= images_torch * 255.0, tracks=tracks, visibility=visibility, filename="cotracker3_visualization")
+    visualizer.visualize(video= images_torch * 255.0, tracks=tracks, visibility=visibility, filename="cotracker3_visualization_max")
     
     return tracks.squeeze(0), visibility.squeeze(0)
 

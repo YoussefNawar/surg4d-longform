@@ -2,11 +2,6 @@
 config_path: arguments/cholecseg8k/default.py
 
 depth_loss_weight: 1.0
-opacity_loss_weight: 0.0 # does not make sense without densification
-
-# Optical flow loss: encourages Gaussian flow to match RAFT optical flow
-flow_loss_weight: 0.0  # set > 0 to enable (e.g., 0.1), only active in fine stages
-flow_thresh: 0.1  # threshold for large motion mask (filter out noise)
 
 # CoTracker3 control point settings
 cotracker_k_neighbors: 1  # number of nearest control points per Gaussian
@@ -15,14 +10,14 @@ cotracker_idw_power: 2.0  # power parameter for inverse distance weighting
 cotracker_spawn_threshold_pct: 0.1  # spawn new Gaussians when pixels are >X% of image width/height from control points
 
 dynamic_language: true
-dynamic_scale: false
-dynamic_color: false
+dynamic_scale: true
+dynamic_color: true
 
 # coarse iterations cut by 10x because we're only overfitting the feature heads on a single frame
 coarse_base_iterations: 0
 coarse_lang_iterations: 1
-fine_base_iterations: 1000
-fine_lang_iterations: 1000
+fine_base_iterations: 2000
+fine_lang_iterations: 2000
 
 # settings for simplifying coarse training for high quality initial depth map
 # TODO: fix this later, only for debugging
@@ -38,8 +33,8 @@ progressive_window:
 
 # each stage starts at 0 iterations and the lang stages consider these lists
 # ATTENTION: it's crucial to save the last iteration of fine lang here!
-test_iterations: [100, 10000] # when to compute val metrics (logged to tensorboard)
-save_iterations: [1000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
+test_iterations: [2000] # when to compute val metrics (logged to tensorboard)
+save_iterations: [2000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
 checkpoint_iterations: [] # when to save full checkpoints (with optimizer states for resuming)
 
 render_outputs:

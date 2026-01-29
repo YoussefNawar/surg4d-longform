@@ -270,22 +270,6 @@ def scene_reconstruction(
     save_path = os.path.join(scene.model_path, "training_output_img")
     os.makedirs(save_path, exist_ok=True)
     total_time_ongt = 0
-    
-    # Initialize RAFT model for flow computation (only if flow loss is enabled)
-    raft_model = None
-    if (
-        "fine" in stage
-        and hasattr(args, "flow_loss_weight")
-        and args.flow_loss_weight > 0.0
-    ):
-        from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
-        weights = Raft_Large_Weights.DEFAULT
-        raft_model = raft_large(weights=weights, progress=False)
-        raft_model = raft_model.eval().cuda()
-    
-    # Cache previous batch renders for flow computation when batch_size == 1
-    # This allows computing flow between different cameras across iterations
-    previous_batch_renders = None
 
     # Consistent indices for logging
     num_gaussians = gaussians.get_xyz.shape[0]
@@ -445,8 +429,6 @@ def scene_reconstruction(
         depth_maps = []
         gt_depth_maps = []
 
-        # Collect all renders and gt_images first (needed for pairwise flow computation)
-        batch_renders = []
         
         for viewpoint_cam in viewpoint_cams:
             render_pkg = render(
@@ -465,13 +447,6 @@ def scene_reconstruction(
                 gt_image = viewpoint_cam.original_image.cuda()
             else:
                 gt_image = viewpoint_cam["image"].cuda()
-            
-            # Store render and gt_image for potential flow computation
-            batch_renders.append({
-                "render_pkg": render_pkg,
-                "viewpoint_cam": viewpoint_cam,
-                "gt_image": gt_image,
-            })
             
             (
                 image,
@@ -570,119 +545,6 @@ def scene_reconstruction(
                 Ll1_rgb = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
                 resdict["rgb_l1"] = Ll1_rgb.item()
                 Ll1 += Ll1_rgb
-        
-        # Flow loss: pairwise computation within batch or with previous batch (only in fine stages)
-        flow_losses = []
-        if (
-            "fine" in stage
-            and hasattr(args, "flow_loss_weight")
-            and args.flow_loss_weight > 0.0
-        ):
-            if len(batch_renders) > 1:
-                # Option 1: If batch_size > 1, compute pairwise flow between all pairs in current batch
-                for i in range(len(batch_renders)):
-                    for j in range(i + 1, len(batch_renders)):
-                        render_i = batch_renders[i]
-                        render_j = batch_renders[j]
-                        
-                        # Compute RAFT flow from camera i to camera j
-                        gt_flow = compute_raft_flow(
-                            render_i["gt_image"],
-                            render_j["gt_image"],
-                            raft_model,
-                        )
-                        
-                        # Compute Gaussian flow loss (i -> j)
-                        predicted_flow = compute_gaussian_flow(
-                            render_t_1=render_i["render_pkg"],
-                            render_t_2=render_j["render_pkg"],
-                        )
-
-                        # Visualize pseudo ground truth flow
-                        save_path_gt_flow = f"{save_path}/flow_gt_{render_i['viewpoint_cam'].colmap_id}_{render_j['viewpoint_cam'].colmap_id}.png"
-                        visualize_flow(
-                            flow=gt_flow.detach(),
-                            image1=render_i["gt_image"],
-                            image2=render_j["gt_image"],
-                            save_path=save_path_gt_flow
-                        )
-
-                        # Visualize rendered flow
-                        save_path_predicted_flow = f"{save_path}/flow_pred_{render_i['viewpoint_cam'].colmap_id}_{render_j['viewpoint_cam'].colmap_id}.png"
-                        visualize_flow(
-                            flow=predicted_flow.detach().permute(2, 0, 1), # Taking (H, W, 2) -> (2, H, W)
-                            image1=render_i["render_pkg"]["render"].detach(),
-                            image2=render_j["render_pkg"]["render"].detach(),
-                            save_path=save_path_predicted_flow
-                        )
-
-                        flow_thresh = getattr(args, "flow_thresh", 0.1)
-
-                        flow_loss_ij = compute_flow_loss(
-                            gt_flow=gt_flow,
-                            predicted_flow=predicted_flow,
-                            flow_thresh=flow_thresh,
-                        )
-                        flow_losses.append(flow_loss_ij)
-            
-            elif previous_batch_renders is not None:
-                # Option 2: If batch_size == 1, compute flow between current camera and previous batch's cameras
-                # This allows flow between different cameras across iterations
-                current_render = batch_renders[0]
-                
-                for prev_render in previous_batch_renders:
-                    # Only compute flow if cameras are different (different camera perspectives)
-                    if prev_render["viewpoint_cam"].colmap_id != current_render["viewpoint_cam"].colmap_id:
-                        # Compute RAFT flow from previous camera to current camera
-                        gt_flow = compute_raft_flow(
-                            prev_render["gt_image"],
-                            current_render["gt_image"],
-                            raft_model,
-                        )
-                        
-                        # Compute Gaussian flow loss
-                        predicted_flow = compute_gaussian_flow(
-                            render_t_1=prev_render["render_pkg"],
-                            render_t_2=current_render["render_pkg"],
-                        )
-
-                        flow_thresh = getattr(args, "flow_thresh", 0.1)
-                        flow_loss_ij = compute_flow_loss(
-                            gt_flow=gt_flow,
-                            predicted_flow=predicted_flow,
-                            flow_thresh=flow_thresh,
-                        )
-                        flow_losses.append(flow_loss_ij)
-
-                        # Visualize flow
-                        save_path_gt_flow = f"{save_path}/flow_gt_{prev_render['viewpoint_cam'].colmap_id}_{current_render['viewpoint_cam'].colmap_id}.png"
-                        visualize_flow(
-                            flow=gt_flow,
-                            image1=prev_render["gt_image"],
-                            image2=current_render["gt_image"],
-                            save_path=save_path_gt_flow
-                        )
-                        
-                        save_path_predicted_flow = f"{save_path}/flow_pred_{prev_render['viewpoint_cam'].colmap_id}_{current_render['viewpoint_cam'].colmap_id}.png"
-                        visualize_flow(
-                            flow=predicted_flow.permute(2, 0, 1), # Taking (H, W, 2) -> (2, H, W)
-                            image1=prev_render["render_pkg"]["render"],
-                            image2=current_render["render_pkg"]["render"],
-                            save_path=save_path_predicted_flow
-                        )
-            
-            # Store current batch for next iteration (only if batch_size == 1)
-            if len(batch_renders) == 1:
-                previous_batch_renders = batch_renders
-            else:
-                # If batch_size > 1, don't cache (we compute within batch)
-                previous_batch_renders = None
-            
-            if len(flow_losses) > 0:
-                flow_loss = torch.stack(flow_losses).mean()
-                resdict["flow_loss"] = flow_loss.item()
-                print(f"weighted flow_loss: {args.flow_loss_weight * flow_loss.item()}\n")
-                Ll1 += args.flow_loss_weight * flow_loss
         
         # if opt.include_feature:
         #     Ll1 += l1_loss(language_feature*language_feature_mask, gt_language_feature*language_feature_mask)
@@ -878,14 +740,7 @@ def scene_reconstruction(
             logger.info("loss is nan,end training, reexecv program now.")
 
             os.execv(sys.executable, [sys.executable] + sys.argv)
-        loss_cutoff = 2.5 + 2.5 * args.depth_loss_weight + 2.5 * args.opacity_loss_weight
-        if loss.item() > loss_cutoff and iteration > 100 and "coarse-lang" not in stage:
-            logger.info("loss", loss)
-            logger.info(
-                f"loss bigger than {loss_cutoff},end training, reexecv program now."
-            )
 
-            os.execv(sys.executable, [sys.executable] + sys.argv)
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = (
@@ -1442,9 +1297,6 @@ if __name__ == "__main__":
     parser.add_argument("--resume_from_iter", type=int, default=-1)
     # custom loss stuff
     parser.add_argument("--depth_loss_weight", type=float, default=0.0)
-    parser.add_argument("--opacity_loss_weight", type=float, default=0.0)
-    parser.add_argument("--flow_loss_weight", type=float, default=0.0)
-    parser.add_argument("--flow_thresh", type=float, default=0.1)
 
     args = parser.parse_args(sys.argv[1:])
     if args.configs:

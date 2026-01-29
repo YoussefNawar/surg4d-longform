@@ -70,9 +70,6 @@ def train_splat(clip: DictConfig, cfg: DictConfig):
     parser.add_argument("--resume_from_stage", type=str, default="")
     parser.add_argument("--resume_from_iter", type=int, default=-1)
     parser.add_argument("--depth_loss_weight", type=float, default=0.0)
-    parser.add_argument("--opacity_loss_weight", type=float, default=0.0)
-    parser.add_argument("--flow_loss_weight", type=float, default=0.0)
-    parser.add_argument("--flow_thresh", type=float, default=0.1)
     parser.add_argument("--coarse_freeze_xyz", action="store_true")
     parser.add_argument("--coarse_frame_idx", type=int, default=None)
     # Progressive window arguments for fine stage training
@@ -100,12 +97,6 @@ def train_splat(clip: DictConfig, cfg: DictConfig):
         "0" if cfg.splat.dynamic_language else "1",
         "--depth_loss_weight",
         str(cfg.splat.depth_loss_weight),
-        "--opacity_loss_weight",
-        str(cfg.splat.opacity_loss_weight),
-        "--flow_loss_weight",
-        str(cfg.splat.get("flow_loss_weight", 0.0)),
-        "--flow_thresh",
-        str(cfg.splat.get("flow_thresh", 0.1)),
     ]
     
     # Add coarse_freeze_xyz flag if enabled

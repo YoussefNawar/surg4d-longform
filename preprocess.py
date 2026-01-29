@@ -375,17 +375,11 @@ def delete_unused_files(clip: DictConfig, cfg: DictConfig):
 def da3(clip: DictConfig, cfg: DictConfig):
     clip_dir = Path(cfg.preprocessed_root) / clip.name
 
-    # we need subfolder "images" because it's hardcoded in 4dlangsplat loading code
-    rgb_dir = clip_dir / "rgb"
     images_dir = clip_dir / "images"
-    if images_dir.exists():
-        shutil.rmtree(images_dir)
-    rgb_dir.rename(images_dir)
 
     # load da3 model
-    # TODO: change back, debugging on small GPU for now
-    # model = DepthAnything3.from_pretrained("depth-anything/DA3NESTED-GIANT-LARGE")
-    model = DepthAnything3.from_pretrained("depth-anything/DA3-LARGE-1.1")
+    model = DepthAnything3.from_pretrained("depth-anything/DA3NESTED-GIANT-LARGE")
+    # model = DepthAnything3.from_pretrained("depth-anything/DA3-LARGE-1.1")
     model = model.to("cuda:0")
 
     # construct image paths and determine processing resolution close to orig

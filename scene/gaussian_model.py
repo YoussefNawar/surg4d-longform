@@ -199,9 +199,16 @@ class GaussianModel:
         self.spatial_lr_scale = spatial_lr_scale
         # breakpoint()
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
-        # Initialize features to zero (no color initialization from point cloud)
-        features = torch.zeros((fused_point_cloud.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
-        features[:, 3:, 1:] = 0.0
+
+        # # Initialize features to zero (no color initialization from point cloud)
+        # features = torch.zeros((fused_point_cloud.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
+        # features[:, 3:, 1:] = 0.0
+
+        # Initialize colors from point cloud
+        fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
+        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
+        features[:, :3, 0 ] = fused_color
+
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
