@@ -265,7 +265,7 @@ def scene_reconstruction(
     #
     count = 0
 
-    log_iter_interval = 100
+    log_iter_interval = 500
 
     save_path = os.path.join(scene.model_path, "training_output_img")
     os.makedirs(save_path, exist_ok=True)
