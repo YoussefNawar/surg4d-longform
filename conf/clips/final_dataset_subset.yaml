@@ -16,14 +16,14 @@
   last_frame: 1883
   frame_stride: 1
 
-- name: video18_00979
-  video_id: 18
-  first_frame: 979
-  last_frame: 1059
-  frame_stride: 1
+# - name: video18_00979
+#   video_id: 18
+#   first_frame: 979
+#   last_frame: 1059
+#   frame_stride: 1
 
-- name: video20_03260
-  video_id: 20
-  first_frame: 3260
-  last_frame: 3340
-  frame_stride: 1
+# - name: video20_03260
+#   video_id: 20
+#   first_frame: 3260
+#   last_frame: 3340
+#   frame_stride: 1

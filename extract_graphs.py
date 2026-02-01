@@ -16,6 +16,7 @@ import os
 from omegaconf import DictConfig
 from tqdm import tqdm
 import gc
+import matplotlib.pyplot as plt
 
 from utils.params_utils import merge_hparams
 from arguments import ModelParams, PipelineParams, ModelHiddenParams
@@ -371,6 +372,23 @@ def spectral_embeddings(L, d, normalize_rows: bool, use_symmetric_eigensolver: b
     return T
 
 
+def assign_noise_to_nearest(samples: np.ndarray, clusters: np.ndarray) -> np.ndarray:
+    """Assign noise points (-1) to their nearest non-noise neighbor's cluster."""
+    noise_mask = clusters == -1
+    if not noise_mask.any():
+        return clusters
+    valid_mask = ~noise_mask
+    if not valid_mask.any():
+        return clusters  # all noise, nothing to assign to
+    # for each noise point, find nearest valid point
+    tree = cKDTree(samples[valid_mask])
+    _, nearest_idx = tree.query(samples[noise_mask], k=1)
+    # map back to original indices
+    valid_indices = np.where(valid_mask)[0]
+    clusters[noise_mask] = clusters[valid_indices[nearest_idx]]
+    return clusters
+
+
 def ng_jordan_weiss_spectral_clustering(
     A, spectral_embedding_dim: int, hdbscan_args: dict, soft_clustering: bool = False
 ):
@@ -406,22 +424,6 @@ def ng_jordan_weiss_spectral_clustering(
         f"[spectral] Components >= min_cluster_size: {(comp_sizes >= hdbscan_args.min_cluster_size).sum()}"
     )
 
-    def assign_noise_to_nearest(T: np.ndarray, clusters: np.ndarray) -> np.ndarray:
-        """Assign noise points (-1) to their nearest non-noise neighbor's cluster."""
-        noise_mask = clusters == -1
-        if not noise_mask.any():
-            return clusters
-        valid_mask = ~noise_mask
-        if not valid_mask.any():
-            return clusters  # all noise, nothing to assign to
-        # for each noise point, find nearest valid point
-        tree = cKDTree(T[valid_mask])
-        _, nearest_idx = tree.query(T[noise_mask], k=1)
-        # map back to original indices
-        valid_indices = np.where(valid_mask)[0]
-        clusters[noise_mask] = clusters[valid_indices[nearest_idx]]
-        return clusters
-
     # if graph connected, cluster and return
     if n_components == 1:
         L = laplacian_sym(A)
@@ -435,9 +437,13 @@ def ng_jordan_weiss_spectral_clustering(
         hdbscan_noise = (clusters == -1).sum()
         if soft_clustering:
             clusters = assign_noise_to_nearest(T, clusters)
-            print(f"[spectral] Assigned {hdbscan_noise} noise points to nearest clusters")
+            print(
+                f"[spectral] Assigned {hdbscan_noise} noise points to nearest clusters"
+            )
         else:
-            print(f"[spectral] Noise: {hdbscan_noise} total, 0 disconnected, {hdbscan_noise} HDBSCAN")
+            print(
+                f"[spectral] Noise: {hdbscan_noise} total, 0 disconnected, {hdbscan_noise} HDBSCAN"
+            )
         return clusters
 
     # if disconnected graph, cluster each component separately
@@ -470,10 +476,10 @@ def ng_jordan_weiss_spectral_clustering(
         comp_clusters = hdbscan.HDBSCAN(**hdbscan_args).fit_predict(T_sub)
         comp_noise = (comp_clusters == -1).sum()
         hdbscan_noise += comp_noise
-        
+
         if soft_clustering:
             comp_clusters = assign_noise_to_nearest(T_sub, comp_clusters)
-        
+
         # assign offsetted cluster ids to original indices
         valid_mask = comp_clusters >= 0
         clusters[comp_indices[valid_mask]] = comp_clusters[valid_mask] + cluster_offset
@@ -481,13 +487,73 @@ def ng_jordan_weiss_spectral_clustering(
 
     total_noise = (clusters == -1).sum()
     if soft_clustering:
-        print(f"[spectral] Assigned {hdbscan_noise} HDBSCAN noise points to nearest clusters, {total_noise} unassigned (from {disconnected_noise} small components)")
+        print(
+            f"[spectral] Assigned {hdbscan_noise} HDBSCAN noise points to nearest clusters, {total_noise} unassigned (from {disconnected_noise} small components)"
+        )
     else:
-        print(f"[spectral] Noise: {total_noise} total, {disconnected_noise} disconnected, {hdbscan_noise} HDBSCAN")
+        print(
+            f"[spectral] Noise: {total_noise} total, {disconnected_noise} disconnected, {hdbscan_noise} HDBSCAN"
+        )
     return clusters
 
 
-def build_graph(
+def dump_histogram(
+    data: np.ndarray, output_path: Path, title: str, xlabel: str, sigma: float
+):
+    """Save a histogram of the data distribution with RBF kernel overlay."""
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # histogram on primary y-axis
+    counts, bins, _ = ax1.hist(
+        data.ravel(),
+        bins=100,
+        edgecolor="black",
+        alpha=0.7,
+        label="Distance distribution",
+    )
+    ax1.set_xlabel(xlabel)
+    ax1.set_ylabel("Count", color="tab:blue")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+
+    # RBF kernel on secondary y-axis
+    ax2 = ax1.twinx()
+    x = np.linspace(0, data.max(), 200)
+    rbf = np.exp(-(x**2) / (2 * sigma**2))
+    ax2.plot(x, rbf, color="tab:red", linewidth=2, label=f"RBF kernel (σ={sigma:.4f})")
+    ax2.set_ylabel("RBF Similarity", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+    ax2.set_ylim(0, 1.1)
+
+    # vertical lines for mean/std
+    ax1.axvline(
+        data.mean(),
+        color="green",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"mean={data.mean():.4f}",
+    )
+    ax1.axvline(
+        data.mean() + data.std(),
+        color="orange",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"std={data.std():.4f}",
+    )
+    ax1.axvline(data.mean() - data.std(), color="orange", linestyle=":", linewidth=1.5)
+
+    # combined legend
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+
+    ax1.set_title(title)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"[build_graph] Saved histogram to {output_path}")
+
+
+def build_similarity_graph(
     positions: np.ndarray,
     normalized_lf: np.ndarray,
     k: int,
@@ -495,6 +561,7 @@ def build_graph(
     weight_lf: float,
     sigma_pos_factor: float,
     sigma_lf_factor: float,
+    histogram_output_dir: Path | None = None,
 ):
     """Build a weighted, symmetric knn graph
 
@@ -516,8 +583,18 @@ def build_graph(
     knn_indices, knn_dists = nnd.neighbor_graph
     rows = np.repeat(np.arange(n_samples), k + 1)
     cols = knn_indices.ravel()
-    print(f"[build_graph] knn_dists min {knn_dists.min()}, max {knn_dists.max()}, mean {knn_dists.mean()}, std {knn_dists.std()}")
+    print(
+        f"[build_graph] knn_dists min {knn_dists.min()}, max {knn_dists.max()}, mean {knn_dists.mean()}, std {knn_dists.std()}"
+    )
     sigma_pos = sigma_pos_factor * knn_dists.mean()
+    if histogram_output_dir is not None:
+        dump_histogram(
+            knn_dists,
+            histogram_output_dir / "knn_position_dists.png",
+            "KNN Position Distances",
+            "Euclidean Distance",
+            sigma_pos,
+        )
     knn_dists_rbf = np.exp(-(knn_dists**2) / (2 * sigma_pos**2))
     knn_position = sp.csr_matrix(
         (knn_dists_rbf.ravel(), (rows, cols)), shape=(n_samples, n_samples)
@@ -530,9 +607,19 @@ def build_graph(
     lf_cos_sim = np.clip(
         (lf_cos_sim + 1) / 2, 0, 1
     )  # we need range [0, 1] so degree matrix does not get negative entries
-    lf_cos_dist = 1 - lf_cos_sim # we want distances in [0, 1] for rbf kernel
-    print(f"[build_graph] lf_cos_dist min {lf_cos_dist.min()}, max {lf_cos_dist.max()}, mean {lf_cos_dist.mean()}, std {lf_cos_dist.std()}")
+    lf_cos_dist = 1 - lf_cos_sim  # we want distances in [0, 1] for rbf kernel
+    print(
+        f"[build_graph] lf_cos_dist min {lf_cos_dist.min()}, max {lf_cos_dist.max()}, mean {lf_cos_dist.mean()}, std {lf_cos_dist.std()}"
+    )
     sigma_lf = sigma_lf_factor * lf_cos_dist.mean()
+    if histogram_output_dir is not None:
+        dump_histogram(
+            lf_cos_dist,
+            histogram_output_dir / "knn_lf_cos_dist.png",
+            "KNN Language Feature Cosine Distance",
+            "Cosine Distance (1 - sim)",
+            sigma_lf,
+        )
     lf_cos_dist_rbf = np.exp(-(lf_cos_dist**2) / (2 * sigma_lf**2))
     knn_language = sp.csr_matrix(
         (lf_cos_dist_rbf, (new_rows, new_cols)), shape=(n_samples, n_samples)
@@ -546,17 +633,164 @@ def build_graph(
     )
 
     graph = weight_pos * knn_position + weight_lf * knn_language
-    return graph, nnd
+    return graph
+
+
+def hdbscan_on_precomputed_graph(
+    A_dist: sp.csr_matrix,
+    samples: np.ndarray,
+    hdbscan_args: dict,
+    soft_clustering: bool = False,
+):
+    """HDBSCAN clustering on a precomputed distance graph.
+
+    Handles disconnected graphs by clustering each connected component separately.
+
+    Args:
+        A_dist: Distance adjacency matrix (n x n)
+        samples: Sample features for noise assignment (n x d)
+        hdbscan_args: Arguments for HDBSCAN clustering
+        soft_clustering: If True, assign noise points to nearest cluster.
+            If False, leave noise points marked as -1.
+
+    Returns:
+        clusters: Cluster assignments (n,), -1 for noise (only if soft_clustering=False)
+    """
+    n_samples = A_dist.shape[0]
+    n_components, component_labels = sp.csgraph.connected_components(
+        A_dist, directed=False
+    )
+
+    # print component stats
+    comp_sizes = np.bincount(component_labels)
+    print(
+        f"[hdbscan] {n_samples} samples, {n_components} components, min_cluster_size={hdbscan_args['min_cluster_size']}"
+    )
+    print(f"[hdbscan] Largest 10 components: {sorted(comp_sizes, reverse=True)[:10]}")
+    print(
+        f"[hdbscan] Components >= min_cluster_size: {(comp_sizes >= hdbscan_args['min_cluster_size']).sum()}"
+    )
+
+    # if graph connected, cluster and return
+    if n_components == 1:
+        max_dist = A_dist.data.max()
+        clusters = hdbscan.HDBSCAN(
+            metric="precomputed", max_dist=max_dist, **hdbscan_args
+        ).fit_predict(A_dist)
+        hdbscan_noise = (clusters == -1).sum()
+        if soft_clustering:
+            clusters = assign_noise_to_nearest(samples, clusters)
+            print(
+                f"[hdbscan] Assigned {hdbscan_noise} noise points to nearest clusters"
+            )
+        else:
+            print(
+                f"[hdbscan] Noise: {hdbscan_noise} total, 0 disconnected, {hdbscan_noise} HDBSCAN"
+            )
+        return clusters
+
+    # if disconnected graph, cluster each component separately
+    clusters = np.full(n_samples, -1, dtype=np.int32)
+    cluster_offset = 0
+    disconnected_noise = 0
+    hdbscan_noise = 0
+
+    for comp_id in range(n_components):
+        comp_mask = component_labels == comp_id
+        comp_size = comp_mask.sum()
+
+        # leave component as noise if too small
+        if comp_size < hdbscan_args["min_cluster_size"]:
+            disconnected_noise += comp_size
+            continue
+
+        # subgraph
+        comp_indices = np.where(comp_mask)[0]
+        A_sub = A_dist[comp_indices][:, comp_indices]
+
+        # cluster
+        max_dist = A_sub.data.max() if A_sub.nnz > 0 else 1.0
+        comp_clusters = hdbscan.HDBSCAN(
+            metric="precomputed", max_dist=max_dist, **hdbscan_args
+        ).fit_predict(A_sub)
+        comp_noise = (comp_clusters == -1).sum()
+        hdbscan_noise += comp_noise
+
+        if soft_clustering:
+            comp_clusters = assign_noise_to_nearest(
+                samples[comp_indices], comp_clusters
+            )
+
+        # assign offsetted cluster ids to original indices
+        valid_mask = comp_clusters >= 0
+        clusters[comp_indices[valid_mask]] = comp_clusters[valid_mask] + cluster_offset
+        cluster_offset += comp_clusters.max() + 1 if valid_mask.any() else 0
+
+    total_noise = (clusters == -1).sum()
+    if soft_clustering:
+        print(
+            f"[hdbscan] Assigned {hdbscan_noise} HDBSCAN noise points to nearest clusters, {total_noise} unassigned (from {disconnected_noise} small components)"
+        )
+    else:
+        print(
+            f"[hdbscan] Noise: {total_noise} total, {disconnected_noise} disconnected, {hdbscan_noise} HDBSCAN"
+        )
+    return clusters
+
+
+def hdbscan_cluster_gaussians(
+    gaussians: GaussianModel, cfg: DictConfig, histogram_output_dir: Path | None = None
+):
+    deformed_data = [
+        deform_at_timestep(gaussians, t)
+        for t in np.linspace(
+            0,
+            1,
+            cfg.graph_extraction.hdbscan_clustering.pos_timesteps,
+            dtype=np.float32,
+        )
+    ]
+    pos_through_time = np.concatenate([i[0] for i in deformed_data], axis=-1)
+    lf = deformed_data[0][2]
+    sparse_A = build_similarity_graph(
+        positions=pos_through_time,
+        normalized_lf=lf,
+        k=cfg.graph_extraction.hdbscan_clustering.knn_graph_k,
+        weight_pos=cfg.graph_extraction.hdbscan_clustering.weight_pos,
+        weight_lf=cfg.graph_extraction.hdbscan_clustering.weight_lf,
+        sigma_pos_factor=cfg.graph_extraction.hdbscan_clustering.rbf_sigma_pos_factor,
+        sigma_lf_factor=cfg.graph_extraction.hdbscan_clustering.rbf_sigma_lf_factor,
+        histogram_output_dir=histogram_output_dir,
+    )
+
+    # hdbscan needs distances - clamp to avoid inf
+    sparse_A.data = np.clip(sparse_A.data, 1e-6, None)
+    sparse_A.data = 1.0 / sparse_A.data
+
+    clusters = hdbscan_on_precomputed_graph(
+        A_dist=sparse_A,
+        samples=pos_through_time,
+        hdbscan_args=dict(cfg.graph_extraction.hdbscan_clustering.hdbscan_args),
+        soft_clustering=cfg.graph_extraction.hdbscan_clustering.soft_clustering,
+    )
+
+    print(f"[hdbscan] total clusters: {len(np.unique(clusters[clusters >= 0]))}")
+    return clusters
 
 
 def spectral_cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
     deformed_data = [
         deform_at_timestep(gaussians, t)
-        for t in np.linspace(0, 1, cfg.graph_extraction.spectral_clustering.pos_timesteps, dtype=np.float32)
+        for t in np.linspace(
+            0,
+            1,
+            cfg.graph_extraction.spectral_clustering.pos_timesteps,
+            dtype=np.float32,
+        )
     ]
     pos_through_time = np.concatenate([i[0] for i in deformed_data], axis=-1)
     lf = deformed_data[0][2]
-    sparse_A, nnd = build_graph(
+    sparse_A = build_similarity_graph(
         positions=pos_through_time,
         normalized_lf=lf,
         k=cfg.graph_extraction.spectral_clustering.knn_graph_k,
@@ -577,11 +811,11 @@ def spectral_cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
     # n_noise = noise_mask.sum()
     # if n_noise > 0:
     #     print(f"[spectral] Assigning {n_noise} unassigned points (small components) via k-NN...")
-        
+
     #     noise_positions = pos_through_time[noise_mask]
     #     query_k = min(cfg.graph_extraction.spectral_clustering.noise_assignment_k, pos_through_time.shape[0] - 1)
     #     neighbor_indices, _ = nnd.query(noise_positions.astype(np.float32), k=query_k)
-        
+
     #     noise_indices = np.where(noise_mask)[0]
     #     for i, noise_idx in enumerate(noise_indices):
     #         for j in range(query_k):
@@ -589,7 +823,7 @@ def spectral_cluster_gaussians(gaussians: GaussianModel, cfg: DictConfig):
     #             if clusters[neighbor] >= 0:
     #                 clusters[noise_idx] = clusters[neighbor]
     #                 break
-        
+
     #     remaining_noise = (clusters == -1).sum()
     #     print(f"[spectral] {remaining_noise} points still unassigned")
 
@@ -697,11 +931,7 @@ def clusterwise_qwen_feats(
 
         indices = np.random.choice(
             np.arange(cluster_lfs.shape[0]),
-            np.clip(
-                cluster_lfs.shape[0],
-                cfg.graph_extraction.min_features_per_cluster,
-                cfg.graph_extraction.max_features_per_cluster,
-            ),
+            min(cluster_lfs.shape[0], cfg.graph_extraction.features_per_cluster),
             replace=True,
         )
         feats = decode_qwen(
@@ -788,11 +1018,19 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
 
     # clustering
     logger.info(f"Clustering with {cfg.graph_extraction.cluster_method} method...")
-    assert cfg.graph_extraction.cluster_method in ["spectral", "precomputed"]
+    model_path = Path(cfg.output_root) / clip.name
+    graph_output_dir = Path(model_path) / cfg.graph_extraction.graph_output_subdir
+    graph_output_dir.mkdir(parents=True, exist_ok=True)
+
+    assert cfg.graph_extraction.cluster_method in ["spectral", "precomputed", "hdbscan"]
     if cfg.graph_extraction.cluster_method == "spectral":
         clusters = spectral_cluster_gaussians(gaussians, cfg=cfg)
     if cfg.graph_extraction.cluster_method == "precomputed":
         clusters = load_precomputed_instance_clusters(clip, cfg)
+    if cfg.graph_extraction.cluster_method == "hdbscan":
+        clusters = hdbscan_cluster_gaussians(
+            gaussians, cfg=cfg, histogram_output_dir=graph_output_dir
+        )
 
     # post-clustering filtering
     logger.info(f"Post-clustering filtering...")
@@ -836,9 +1074,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
 
     # save outputs
     logger.info(f"Saving outputs...")
-    model_path = Path(cfg.output_root) / clip.name
-    out = Path(model_path) / cfg.graph_extraction.graph_output_subdir
-    out.mkdir(parents=True, exist_ok=True)
+    out = graph_output_dir
     cluster_feats_dict = {}
     for cluster_id in selected_decoded_lf_through_time[0].keys():
         cluster_feats_dict[str(cluster_id)] = np.stack(
@@ -864,6 +1100,9 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     )  # dense bhattacharyya coefficients through time (timesteps, n_clusters, n_clusters)
     np.save(out / "positions.npy", pos_through_time)  # (T, n_filtered_gaussians, 3)
     np.save(out / "clusters.npy", clusters)  # (n_filtered_gaussians,)
+    np.save(
+        out / "patch_latents_through_time.npy", lf_patch_through_time
+    )  # patch latents through time (timesteps, n_filtered_gaussians, lang_dim)
 
     # rerun visualization
     logger.info(f"Visualizing to rerun...")

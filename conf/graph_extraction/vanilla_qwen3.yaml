@@ -10,6 +10,7 @@ num_lang_features: ${splat.num_lang_features}
 lang_feature_dim: ${splat.lang_feature_dim}
 load_stage: fine-lang
 iteration: -1
+# iteration: 1000
 
 # ae params
 checkpoint_subdir: ${autoencoder.checkpoint_subdir}
@@ -22,7 +23,7 @@ global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
 precluster_opacity_threshold: 0.05
 
 # clustering
-cluster_method: spectral # one of: [spectral, precomputed]
+cluster_method: hdbscan # one of: [spectral, precomputed, hdbscan]
 
 # spectral clustering
 spectral_clustering:
@@ -39,9 +40,20 @@ spectral_clustering:
   rbf_sigma_pos_factor: 1.0
   rbf_sigma_lf_factor: 2.0
 
+hdbscan_clustering:
+  knn_graph_k: 30
+  soft_clustering: true
+  hdbscan_args:
+    min_cluster_size: 300
+    min_samples: 30
+  pos_timesteps: 10
+  weight_pos: 1.0
+  weight_lf: 5.0
+  rbf_sigma_pos_factor: 1.0
+  rbf_sigma_lf_factor: 0.5
+
 # how many vision features represent each cluster
-max_features_per_cluster: 40
-min_features_per_cluster: 4
+features_per_cluster: 64
 
 # lf decoding
 decode_batch_size: 16384
