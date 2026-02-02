@@ -1,4 +1,4 @@
-graph_output_subdir: graph_exp
+graph_output_subdir: graph
 
 # gaussian model params
 language_feature_hiddendim: ${splat.language_feature_hiddendim}
