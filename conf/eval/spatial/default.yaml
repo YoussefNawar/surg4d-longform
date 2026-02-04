@@ -33,38 +33,32 @@ frame_attn_refine_include_scores_in_context: false
 frame_attn_refine_max_proposals: 10
 frame_attn_refine_system_prompt: |
   # Task
-  You are an expert visceral surgeon locating objects or actions in a cholecystectomy scene.
-  You have access to an image of the scene and pixel coordinate proposals extracted from attention scores.
+  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+  - You have access to an image of the scene and coordinate proposals extracted from attention scores.
 
   # Rules
-  - Think briefly (max 5000 tokens).
-
-  # Answer format
-  Your final answer should always contain exactly one 2D point as a JSON object. Never refuse!
-  Report the point in the images pixel coordinate system.
+  - Think briefly, do not spend too much time.
 frame_attn_refine_prompt_template: |
   Locate '{substring}' in the image.
 
-  Example output (format only): ... {{"x": 112.0, "y": 256.0}} ...
+  Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
+  Example output (format only): ... {{"x": X, "y": Y}} ...
 
 # ============================================================================
 # FRAME_DIRECT (directly ask qwen to return a pixel on the image)
 # ============================================================================
 frame_direct_system_prompt: |
   # Task
-  You are an expert visceral surgeon locating objects or actions in a cholecystectomy scene.
-  You have access to an image of the scene.
+  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+  - You have access to an image of the scene.
 
   # Rules
-  - Think briefly (max 5000 tokens).
-
-  # Answer format
-  Your final answer should always contain exactly one 2D point as a JSON object. Never refuse!
-  Report the point in the images pixel coordinate system.
+  - Think briefly, do not spend too much time.
 frame_direct_prompt_template: |
   Locate '{substring}' in the image.
 
-  Example output (format only): ... {{"x": 112.0, "y": 256.0}} ...
+  Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
+  Example output (format only): ... {{"x": X, "y": Y}} ...
 
 # ============================================================================
 # GRAPH_AGENT (agentic exploration with tools)
@@ -84,26 +78,30 @@ graph_agent_tools:
     max_calls: 3
 graph_agent_system_prompt: |
   # Task
-  You are an expert visceral surgeon locating objects or actions in a cholecystectomy scene.
-  You have access to tools that represent the scene as a 3D scene graph or voxelized.
-  Your initial scene representation is a set of graph nodes at the relevant timestep.
+  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+  - Your initial scene representation is a set of nodes from a single timestep.
+  - Use have access to tools to explore full scene.
 
   # Scene representation
+  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
+  - The scene consists of 20 timesteps.
+  - The scene is reconstructed from a laparoscopic camera view.
   - Coordinate system:
+    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
+    - laparoscopic camera looks in positive z direction
+    - the coordinate system is rouglhly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
     - increase in x means movement to the right
     - increase in y means movement to the bottom
     - increase in z means movement away from the camera
-  - The coordinate system is relative to the laparoscopic camera (which is roughly looking into positive z direction).
-  - The nodes were created by a clustering algorithm and might be imperfect (single object split into multiple nodes / multiple objects merged into single node).
+  - The nodes were created by clustering the scene points and do not perfectly match actual scene objects.
+    - Single scene objects might be split into multiple adjacent nodes.
+    - The nodes' rough images can contain global scene context, but should be focused on the respective object the node represents.
 
   # Rules
   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Think briefly (max 5000 tokens) between tool calls and before giving your final answer.
-
-  # Answer format
-  Your final answer should always contain exactly one 3D point as a JSON object. Never refuse!
-  Report the point in the graph's 3D coordinate system.
+  - Think briefly, do not spend too much time on each turn.
 graph_agent_prompt_template: |
   Identify the 3D location of '{substring}' in the scene.
 
+  Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
   Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...
