@@ -904,7 +904,7 @@ spec_node_movement = {
     "type": "function",
     "function": {
         "name": "node_movement",
-        "description": "Returns the centroid and bounding box of a node at each timestep. Use this to track how a node moves through time.",
+        "description": "Returns the node centroid and its movement (centroid delta to previous timestep) at each timestep.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -921,17 +921,13 @@ spec_node_movement = {
 
 def node_movement(
     centroids: np.ndarray,
-    centers: np.ndarray,
-    extents: np.ndarray,
     node_id: int,
     toolkit: Optional['GraphTools'] = None,
 ) -> Dict[str, Any]:
-    """Return centroid and bounding box for a node at each timestep.
+    """Return the node centroid and its movement at each timestep.
 
     Args:
         centroids: Cluster centroids through time (T, n_clusters, 3)
-        centers: Cluster centers through time (T, n_clusters, 3)
-        extents: Cluster extents through time (T, n_clusters, 3)
         node_id: The node/cluster id to track
         toolkit: Optional GraphTools instance for rerun logging
 
@@ -952,10 +948,8 @@ def node_movement(
     # Build movement data
     movement_data = []
     for t in range(n_timesteps):
+        # centroid
         c = centroids[t, node_id]
-        ctr = centers[t, node_id]
-        ext = extents[t, node_id]
-
         entry = {
             "timestep": int(t),
             "centroid": {
@@ -963,17 +957,18 @@ def node_movement(
                 "y": round(float(c[1]), 4),
                 "z": round(float(c[2]), 4),
             },
-            "bbox_center": {
-                "x": round(float(ctr[0]), 4),
-                "y": round(float(ctr[1]), 4),
-                "z": round(float(ctr[2]), 4),
-            },
-            "bbox_extent": {
-                "x": round(float(ext[0]), 4),
-                "y": round(float(ext[1]), 4),
-                "z": round(float(ext[2]), 4),
-            },
         }
+
+        # delta (movement)
+        if t > 0:
+            prev_c = centroids[t - 1, node_id]
+            movement = {
+                "x": round(float(c[0]) - float(prev_c[0]), 4),
+                "y": round(float(c[1]) - float(prev_c[1]), 4),
+                "z": round(float(c[2]) - float(prev_c[2]), 4),
+            }
+            entry["delta_to_previous"] = movement
+
         movement_data.append(entry)
 
     # Rerun logging
@@ -1510,8 +1505,6 @@ class GraphTools:
                 partial(
                     node_movement,
                     centroids=self.point_o2n(self.centroids),
-                    centers=self.point_o2n(self.centers),
-                    extents=self.distance_o2n(self.extents),
                     toolkit=self,
                 ),
                 spec_node_movement,
