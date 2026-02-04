@@ -47,6 +47,9 @@ QWEN_CONSTANTS = {
 
 QWEN_VERSIONS = tuple(QWEN_CONSTANTS.keys())
 
+THINKING_TOKEN_LIMIT = 8000
+NEW_TOKEN_LIMIT = 10000
+
 
 def timestep_to_seconds_str(timestep: int, fps: float) -> str:
     """Convert timestep index to Qwen3 temporal format.
@@ -345,7 +348,9 @@ def ask_qwen_about_image(
     model: Qwen2_5_VLForConditionalGeneration,
     processor: Qwen2_5_VLProcessor,
     system_prompt: str = "You are a medical assistant designed to aid medical practitioners during a cholecystectomy procedure. The surgeon user will ask you a question and show you their current situation, and you give a concise answer.",
-    max_tokens: int = 8192,
+    max_new_tokens: int = NEW_TOKEN_LIMIT,
+    max_thinking_tokens: int = THINKING_TOKEN_LIMIT,
+    qwen_version: str = "qwen3",
     seed: int = 42,
 ):
     messages = [
@@ -377,9 +382,22 @@ def ask_qwen_about_image(
     ).to(model.device)
 
     _set_generation_seed(seed)
+    generate_kwargs = {
+        "max_new_tokens": max_new_tokens,
+    }
+
+    # thinking token limit processor
+    logits_processor = None
+    if qwen_version == "qwen3" and max_thinking_tokens is not None:
+        thinking_processor = ThinkingTokenBudgetProcessor(
+            processor.tokenizer, max_thinking_tokens=max_thinking_tokens
+        )
+        logits_processor = LogitsProcessorList([thinking_processor])
+        generate_kwargs["logits_processor"] = logits_processor
+
     generated_ids = model.generate(
         **inputs,
-        max_new_tokens=max_tokens,
+        **generate_kwargs,
     )
     generated_ids_trimmed = [
         out_ids[len(in_ids) :]
@@ -410,10 +428,10 @@ def ask_qwen_about_image_features(
     model: Qwen2_5_VLForConditionalGeneration,
     processor: Qwen2_5_VLProcessor,
     system_prompt: str = "You are a medical assistant designed to aid medical practitioners during a cholecystectomy procedure. The surgeon user will ask you a question and show you their current situation, and you give a concise answer.",
-    max_tokens: int = 8192,
     seed: int = 42,
     qwen_version: str = "qwen25",
-    max_thinking_tokens: Optional[int] = None,
+    max_new_tokens: int = NEW_TOKEN_LIMIT,
+    max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
 ):
     messages = [
         {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
@@ -426,7 +444,7 @@ def ask_qwen_about_image_features(
         },
     ]
     return generate_with_vision_features(
-        messages, [image_features], model, processor, qwen_version=qwen_version, max_tokens=max_tokens, seed=seed, max_thinking_tokens=max_thinking_tokens
+        messages, [image_features], model, processor, qwen_version=qwen_version, max_new_tokens=max_new_tokens, seed=seed, max_thinking_tokens=max_thinking_tokens
     )
 
 
@@ -486,9 +504,9 @@ def generate_with_vision_features(
     model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
     processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
     qwen_version: str = "qwen25",
-    max_tokens: int = 8192,
     seed: int = 42,
-    max_thinking_tokens: Optional[int] = None,
+    max_new_tokens: int = NEW_TOKEN_LIMIT,
+    max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
 ):
     """Generate text from vision features.
 
@@ -529,7 +547,7 @@ def generate_with_vision_features(
 
         _set_generation_seed(seed)
         generate_kwargs = {
-            "max_new_tokens": max_tokens,
+            "max_new_tokens": max_new_tokens,
             "custom_patch_features": main_features,
             "custom_deepstack_features": deepstack_features,
         }
@@ -545,7 +563,7 @@ def generate_with_vision_features(
         _set_generation_seed(seed)
         generated_ids = model.generate(
             **inputs,
-            max_new_tokens=max_tokens,
+            max_new_tokens=max_new_tokens,
             custom_patch_features=vision_features,
         )
 
@@ -772,8 +790,8 @@ def generate_with_vision_features_agentic(
     tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
     verbose: bool = False,
     seed: int = 42,
-    max_new_tokens: int = 8192,
-    max_thinking_tokens: Optional[int] = None,
+    max_new_tokens: int = NEW_TOKEN_LIMIT,
+    max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
 ) -> Dict[str, Any]:
     """Generate with vision features in an agentic loop, executing tools until done.
 
@@ -1040,127 +1058,6 @@ def generate_with_vision_features_agentic(
     }
 
 
-def prompt_with_graph_at_timestep(
-    question: str,
-    node_feats: np.lib.npyio.NpzFile,
-    timestep_idx: int,
-    adjacency_matrices: np.ndarray,
-    node_centers: np.ndarray,
-    node_centroids: np.ndarray,
-    node_extents: np.ndarray,
-    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
-    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
-    qwen_version: str = "qwen25",
-    system_prompt: str = None,
-    seed: int = 42,
-):
-    """
-    node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
-    timestep_idx: int - index of the timestep to use for the node features
-    adjacency_matrices: np.ndarray - adjacency matrices through time - weights are bhattacharyya coefficients (timesteps, n_clusters, n_clusters)
-    node_centers: np.ndarray - cluster centers through time (timesteps, n_clusters, 3)
-    node_centroids: np.ndarray - cluster centroids through time (timesteps, n_clusters, 3)
-    node_extents: np.ndarray - cluster extents through time (timesteps, n_clusters, 3)
-    model: Qwen2_5_VLForConditionalGeneration - model to use
-    processor: Qwen2_5_VLProcessor - processor to use
-    system_prompt: str - system prompt to use
-    tools: Dict[str, Tuple[Callable, Dict[str, Any]]] - tools to use
-    """
-    assert (
-        len(adjacency_matrices)
-        == len(node_centers)
-        == len(node_centroids)
-        == len(node_extents)
-    ), "timestep mismatch"
-
-    # node feat indices correspond to cluster ids
-    node_feat_indices = sorted(list(node_feats.keys()), key=lambda x: int(x))
-    node_feats = [node_feats[idx] for idx in node_feat_indices]
-    node_feats = [i[timestep_idx] for i in node_feats]
-    A = adjacency_matrices[timestep_idx]
-    centroids = node_centroids[timestep_idx]
-    extents = node_extents[timestep_idx]
-
-    graph_content = []
-    graph_content.append(
-        {
-            "type": "text",
-            "text": "<spatial-graph>\n",
-        }
-    )
-    for n in range(A.shape[0]):
-        graph_content.extend(
-            [
-                {
-                    "type": "text",
-                    "text": f'<node id="{n}">\n',
-                },
-                {
-                    "type": "text",
-                    "text": "<descriptor>",
-                },
-                {
-                    "type": "image",
-                    "image": None,
-                },
-                {
-                    "type": "text",
-                    "text": "</descriptor>\n",
-                },
-                {
-                    "type": "text",
-                    "text": f'<centroid x="{centroids[n][0]:.2f}" y="{centroids[n][1]:.2f}" z="{centroids[n][2]:.2f}"/>\n',
-                },
-                {
-                    "type": "text",
-                    "text": f'<extent x="{extents[n][0]:.2f}" y="{extents[n][1]:.2f}" z="{extents[n][2]:.2f}"/>\n',
-                },
-                {
-                    "type": "text",
-                    "text": "</node>\n",
-                },
-            ]
-        )
-    for n in range(A.shape[0]):
-        for m in range(A.shape[1]):
-            if A[n, m] > 0:
-                graph_content.append(
-                    {
-                        "type": "text",
-                        "text": f'<edge from="{n}" to="{m}" overlap_score="{A[n, m]:.2f}" centroid_distance="{np.linalg.norm(centroids[n] - centroids[m]):.2f}"/>\n',
-                    }
-                )
-    graph_content.append(
-        {
-            "type": "text",
-            "text": "</spatial-graph>\n",
-        }
-    )
-
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-        {
-            "role": "user",
-            "content": [
-                *graph_content,
-                {"type": "text", "text": "<prompt>"},
-                {"type": "text", "text": question},
-                {"type": "text", "text": "</prompt>\n"},
-            ],
-        },
-    ]
-
-    return generate_with_vision_features(
-        messages=messages,
-        vision_features=[torch.Tensor(f) for f in node_feats],
-        model=model,
-        processor=processor,
-        qwen_version=qwen_version,
-        max_tokens=8192,
-        seed=seed,
-    )
-
-
 def prompt_graph_agent(
     question: str,
     node_feats: np.lib.npyio.NpzFile,
@@ -1292,421 +1189,6 @@ def prompt_graph_agent(
     )
 
 
-def prompt_with_static_graph(
-    question: str,
-    node_feats: np.lib.npyio.NpzFile,
-    node_feats_timestep_idx: int,
-    adjacency_matrices: np.ndarray,
-    node_centers: np.ndarray,
-    node_centroids: np.ndarray,
-    node_extents: np.ndarray,
-    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
-    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
-    qwen_version: str = "qwen25",
-    system_prompt: str = None,
-    fps: float = None,
-    seed: int = 42,
-):
-    """
-    node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
-    node_feats_timestep_idx: int - index of the timestep to use for the node features
-    adjacency_matrices: np.ndarray - adjacency matrices through time - weights are bhattacharyya coefficients (timesteps, n_clusters, n_clusters)
-    node_centers: np.ndarray - cluster centers through time (timesteps, n_clusters, 3)
-    node_centroids: np.ndarray - cluster centroids through time (timesteps, n_clusters, 3)
-    node_extents: np.ndarray - cluster extents through time (timesteps, n_clusters, 3)
-    model: Qwen2_5_VLForConditionalGeneration - model to use
-    processor: Qwen2_5_VLProcessor - processor to use
-    system_prompt: str - system prompt to use
-    fps: Optional frames per second. If provided, uses seconds format instead of timestep.
-    """
-    assert (
-        len(adjacency_matrices)
-        == len(node_centers)
-        == len(node_centroids)
-        == len(node_extents)
-    ), "timestep mismatch"
-
-    # node feat indices correspond to cluster ids
-    node_feat_indices = sorted(list(node_feats.keys()), key=lambda x: int(x))
-    node_feats = [node_feats[idx] for idx in node_feat_indices]
-    node_feats = [i[node_feats_timestep_idx] for i in node_feats]
-    object_content = []
-    for i in range(len(node_feats)):
-        object_content.extend(
-            [
-                {
-                    "type": "text",
-                    "text": f'<object id="{i}">',
-                },
-                {
-                    "type": "image",
-                    "image": None,
-                },
-                {
-                    "type": "text",
-                    "text": "</object>\n",
-                },
-            ]
-        )
-
-    graph_content = []
-    for t in range(len(adjacency_matrices)):
-        A = adjacency_matrices[t]
-        
-        # Format time reference
-        if fps is not None:
-            time_attr = f'timestep="{t}" {timestep_to_seconds_str(t, fps)}'
-        else:
-            time_attr = f'timestep="{t}"'
-        
-        graph_content.append(
-            {
-                "type": "text",
-                "text": f'<spatial-graph {time_attr}>\n',
-            }
-        )
-        for n in range(A.shape[0]):
-            graph_content.extend(
-                [
-                    {
-                        "type": "text",
-                        "text": f'<node object-id="{n}">\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": f'<centroid x="{node_centroids[t][n][0]:.2f}" y="{node_centroids[t][n][1]:.2f}" z="{node_centroids[t][n][2]:.2f}"/>\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": f'<extent x="{node_extents[t][n][0]:.2f}" y="{node_extents[t][n][1]:.2f}" z="{node_extents[t][n][2]:.2f}"/>\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": "</node>\n",
-                    },
-                ]
-            )
-        for n in range(A.shape[0]):
-            for m in range(A.shape[1]):
-                if A[n, m] > 0:
-                    graph_content.append(
-                        {
-                            "type": "text",
-                            "text": f'<edge from="{n}" to="{m}" overlap_score="{A[n, m]:.2f}" centroid_distance="{np.linalg.norm(node_centroids[t][n] - node_centroids[t][m]):.2f}"/>\n',
-                        }
-                    )
-        graph_content.append(
-            {
-                "type": "text",
-                "text": "</spatial-graph>\n",
-            }
-        )
-    # TODO: adapt question and system_prompt
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "<scene-graph>\n"},
-                {"type": "text", "text": "<objects>\n"},
-                *object_content,
-                {"type": "text", "text": "</objects>\n"},
-                {"type": "text", "text": "<spatial-graphs>\n"},
-                *graph_content,
-                {"type": "text", "text": "</spatial-graphs>\n"},
-                {"type": "text", "text": "</scene-graph>\n"},
-                {"type": "text", "text": "<prompt>"},
-                {"type": "text", "text": question},
-                {"type": "text", "text": "</prompt>\n"},
-            ],
-        },
-    ]
-
-    return generate_with_vision_features(
-        messages=messages,
-        vision_features=[torch.Tensor(f) for f in node_feats],
-        model=model,
-        processor=processor,
-        qwen_version=qwen_version,
-        max_tokens=8192,
-        seed=seed,
-    )
-
-
-def prompt_with_dynamic_graph(
-    question: str,
-    node_feats: np.lib.npyio.NpzFile,
-    adjacency_matrices: np.ndarray,
-    node_centers: np.ndarray,
-    node_centroids: np.ndarray,
-    node_extents: np.ndarray,
-    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
-    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
-    qwen_version: str = "qwen25",
-    system_prompt: str = None,
-    fps: float = None,
-    seed: int = 42,
-):
-    assert (
-        len(adjacency_matrices)
-        == len(node_centers)
-        == len(node_centroids)
-        == len(node_extents)
-    ), "timestep mismatch"
-
-    # node feat indices correspond to cluster ids
-    node_feat_indices = sorted(list(node_feats.keys()), key=lambda x: int(x))
-    node_feats = [node_feats[idx] for idx in node_feat_indices]
-
-    graph_content = []
-    for t in range(len(adjacency_matrices)):
-        A = adjacency_matrices[t]
-        
-        # Format time reference
-        if fps is not None:
-            time_attr = f'timestep="{t}" {timestep_to_seconds_str(t, fps)}'
-        else:
-            time_attr = f'timestep="{t}"'
-        
-        graph_content.append(
-            {
-                "type": "text",
-                "text": f'<spatial-graph {time_attr}>\n',
-            }
-        )
-        for n in range(A.shape[0]):
-            graph_content.extend(
-                [
-                    {
-                        "type": "text",
-                        "text": f'<node id="{n}">\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": "<descriptor>",
-                    },
-                    {
-                        "type": "image",
-                        "image": None,
-                    },
-                    {
-                        "type": "text",
-                        "text": "</descriptor>\n",
-                    },
-                    {
-                        "type": "text",
-                        "text": f'<center x="{node_centers[t][n][0]:.2f}" y="{node_centers[t][n][1]:.2f}" z="{node_centers[t][n][2]:.2f}"/>\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": f'<centroid x="{node_centroids[t][n][0]:.2f}" y="{node_centroids[t][n][1]:.2f}" z="{node_centroids[t][n][2]:.2f}"/>\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": f'<extent x="{node_extents[t][n][0]:.2f}" y="{node_extents[t][n][1]:.2f}" z="{node_extents[t][n][2]:.2f}"/>\n',
-                    },
-                    {
-                        "type": "text",
-                        "text": "</node>\n",
-                    },
-                ]
-            )
-        for n in range(A.shape[0]):
-            for m in range(A.shape[1]):
-                if A[n, m] > 0:
-                    centroid_dist = float(
-                        np.linalg.norm(node_centroids[t][n] - node_centroids[t][m])
-                    )
-                    graph_content.append(
-                        {
-                            "type": "text",
-                            "text": f'<edge from="{n}" to="{m}" overlap_score="{A[n, m]:.2f}" centroid_distance="{centroid_dist:.2f}"/>\n',
-                        }
-                    )
-        graph_content.append(
-            {
-                "type": "text",
-                "text": "</spatial-graph>\n",
-            }
-        )
-    
-    # TODO: adapt question and system_prompt
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "<scene-graph>\n"},
-                {"type": "text", "text": "<spatial-graphs>\n"},
-                *graph_content,
-                {"type": "text", "text": "</spatial-graphs>\n"},
-                {"type": "text", "text": "</scene-graph>\n"},
-                {"type": "text", "text": "<prompt>"},
-                {"type": "text", "text": question},
-                {"type": "text", "text": "</prompt>\n"},
-            ],
-        },
-    ]
-
-    feature_list = []
-    for n in range(len(node_feats)):
-        for t in range(node_feats[n].shape[0]):
-            feature_list.append(torch.Tensor(node_feats[n][t]))
-
-    return generate_with_vision_features(
-        messages=messages,
-        vision_features=feature_list,
-        model=model,
-        processor=processor,
-        qwen_version=qwen_version,
-        max_tokens=8192,
-        seed=seed,
-    )
-
-
-def prompt_with_descriptors_at_timestep(
-    question: str,
-    node_feats: np.lib.npyio.NpzFile,
-    timestep_idx: int,
-    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
-    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
-    qwen_version: str = "qwen25",
-    system_prompt: str = None,
-    seed: int = 42,
-):
-    """
-    Ablation of prompt_with_graph_at_timestep: only pass cluster descriptor images
-    for a single timestep, without any graph structure (no nodes/edges/geometry).
-
-    node_feats: np.lib.npyio.NpzFile - npz file containing node features through time
-    timestep_idx: int - index of the timestep to use for the node features
-    """
-    # node feat indices correspond to cluster ids
-    node_feat_indices = sorted(list(node_feats.keys()), key=lambda x: int(x))
-    node_feats_list = [node_feats[idx] for idx in node_feat_indices]
-    node_feats_t = [i[timestep_idx] for i in node_feats_list]
-
-    # Create a descriptor-only prompt with images, no graph structure
-    descriptor_content = []
-    descriptor_content.append(
-        {"type": "text", "text": f'<descriptors t="{timestep_idx}">\n'}
-    )
-    for i in range(len(node_feats_t)):
-        descriptor_content.extend(
-            [
-                {"type": "text", "text": f'<descriptor id="{i}">'},
-                {"type": "image", "image": None},
-                {"type": "text", "text": "</descriptor>\n"},
-            ]
-        )
-    descriptor_content.append({"type": "text", "text": "</descriptors>\n"})
-
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-        {
-            "role": "user",
-            "content": [
-                *descriptor_content,
-                {"type": "text", "text": "<prompt>"},
-                {"type": "text", "text": question},
-                {"type": "text", "text": "</prompt>\n"},
-            ],
-        },
-    ]
-
-    return generate_with_vision_features(
-        messages=messages,
-        vision_features=[torch.Tensor(f) for f in node_feats_t],
-        model=model,
-        processor=processor,
-        qwen_version=qwen_version,
-        max_tokens=8192,
-        seed=seed,
-    )
-
-
-def prompt_with_dynamic_descriptors(
-    question: str,
-    node_feats: np.lib.npyio.NpzFile,
-    adjacency_matrices: np.ndarray,
-    node_centers: np.ndarray,
-    node_centroids: np.ndarray,
-    node_extents: np.ndarray,
-    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
-    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
-    qwen_version: str = "qwen25",
-    system_prompt: str = None,
-    fps: float = None,
-    seed: int = 42,
-):
-    """
-    Ablation of prompt_with_dynamic_graph: pass only descriptor images separated by
-    timestep, omitting all graph structure (no nodes/edges/geometry).
-    """
-    assert (
-        len(adjacency_matrices)
-        == len(node_centers)
-        == len(node_centroids)
-        == len(node_extents)
-    ), "timestep mismatch"
-
-    # node feat indices correspond to cluster ids
-    node_feat_indices = sorted(list(node_feats.keys()), key=lambda x: int(x))
-    node_feats_list = [node_feats[idx] for idx in node_feat_indices]
-
-    # Build descriptor-only content with timestep separation
-    content = []
-    for t in range(len(adjacency_matrices)):
-        # Format time reference
-        if fps is not None:
-            time_attr = f'timestep="{t}" {timestep_to_seconds_str(t, fps)}'
-        else:
-            time_attr = f'timestep="{t}"'
-        
-        content.append({"type": "text", "text": f'<descriptors {time_attr}>\n'})
-        # number of clusters = len(node_feats_list)
-        for n in range(len(node_feats_list)):
-            content.extend(
-                [
-                    {"type": "text", "text": f'<descriptor id="{n}">'},
-                    {"type": "image", "image": None},
-                    {"type": "text", "text": "</descriptor>\n"},
-                ]
-            )
-        content.append({"type": "text", "text": "</descriptors>\n"})
-
-    messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "<descriptors>\n"},
-                *content,
-                {"type": "text", "text": "</descriptors>\n"},
-                {"type": "text", "text": "<prompt>"},
-                {"type": "text", "text": question},
-                {"type": "text", "text": "</prompt>\n"},
-            ],
-        },
-    ]
-
-    # Keep the same feature ordering pattern as prompt_with_dynamic_graph
-    feature_list = []
-    for n in range(len(node_feats_list)):
-        for t in range(node_feats_list[n].shape[0]):
-            feature_list.append(torch.Tensor(node_feats_list[n][t]))
-
-    return generate_with_vision_features(
-        messages=messages,
-        vision_features=feature_list,
-        model=model,
-        processor=processor,
-        qwen_version=qwen_version,
-        max_tokens=8192,
-        seed=seed,
-    )
-
-
 def prompt_with_video_frames(
     question: str,
     image_paths: List[Any],
@@ -1716,8 +1198,8 @@ def prompt_with_video_frames(
     fps: float = None,
     seed: int = 42,
     qwen_version: str = "qwen3",
-    max_new_tokens: int = 8192,
-    max_thinking_tokens: int = 8192,
+    max_new_tokens: int = NEW_TOKEN_LIMIT,
+    max_thinking_tokens: int = THINKING_TOKEN_LIMIT,
 ) -> str:
     """Prompt model with video frames (list of images).
     
