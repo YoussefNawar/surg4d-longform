@@ -1003,6 +1003,135 @@ def node_movement(
     }
 
 
+spec_relative_movement = {
+    "type": "function",
+    "function": {
+        "name": "relative_movement",
+        "description": "Returns the centroid difference vector between two nodes for all timesteps. This can be used to see if two nodes move together.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "node_id_1": {
+                    "type": "integer",
+                    "description": "The first node's id",
+                },
+                "node_id_2": {
+                    "type": "integer",
+                    "description": "The second node's id",
+                },
+            },
+            "required": ["node_id_1", "node_id_2"],
+        },
+    },
+}
+
+
+def relative_movement(
+    centroids: np.ndarray,
+    node_id_1: int,
+    node_id_2: int,
+    toolkit: Optional['GraphTools'] = None,
+) -> Dict[str, Any]:
+    """Compute the centroid difference vector between two nodes through time.
+
+    Args:
+        centroids: Cluster centroids through time (T, n_clusters, 3)
+        node_id_1: First node id
+        node_id_2: Second node id
+        toolkit: Optional GraphTools instance for rerun logging
+    """
+    n_timesteps = centroids.shape[0]
+    n_nodes = centroids.shape[1]
+
+    # Validate node ids
+    if not (0 <= node_id_1 < n_nodes):
+        return {
+            "text": json.dumps(
+                {"error": f"node_id_1={node_id_1} out of range [0, {n_nodes})"}
+            )
+        }
+    if not (0 <= node_id_2 < n_nodes):
+        return {
+            "text": json.dumps(
+                {"error": f"node_id_2={node_id_2} out of range [0, {n_nodes})"}
+            )
+        }
+
+    relative_movements = []
+    for t in range(n_timesteps):
+        c1 = centroids[t, node_id_1]
+        c2 = centroids[t, node_id_2]
+        # Vector from node 1 to node 2
+        diff = c2 - c1
+        
+        entry = {
+            "timestep": t,
+            "centroid_difference": {
+                "x": round(float(diff[0]), 4),
+                "y": round(float(diff[1]), 4),
+                "z": round(float(diff[2]), 4),
+            },
+            "centroid_distance": round(float(np.linalg.norm(diff)), 4),
+        }
+        relative_movements.append(entry)
+
+    # Rerun logging
+    if toolkit is not None and toolkit.recording_active:
+        counter = toolkit.increase_logging_tool_counter()
+        prefix = f"tool_calls/{counter:02d}_relative_movement"
+        
+        # Get masks for visualization (using original coordinates)
+        viz_mask1 = toolkit.clusters == node_id_1
+        viz_mask2 = toolkit.clusters == node_id_2
+        
+        scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
+        point_radius = max(scene_extent * 0.008, 1e-5)
+        
+        for t in range(n_timesteps):
+            rr.set_time("timestep", sequence=t)
+            
+            # Log all points for both clusters with highlight colors
+            rr.log(
+                f"{prefix}/node_{node_id_1}",
+                rr.Points3D(
+                    positions=toolkit.positions[t][viz_mask1],
+                    colors=[[255, 0, 0]], # Red
+                    radii=point_radius
+                )
+            )
+            rr.log(
+                f"{prefix}/node_{node_id_2}",
+                rr.Points3D(
+                    positions=toolkit.positions[t][viz_mask2],
+                    colors=[[0, 0, 255]], # Blue
+                    radii=point_radius
+                )
+            )
+            
+            # Log connection line between centroids
+            c1_orig = toolkit.centroids[t, node_id_1]
+            c2_orig = toolkit.centroids[t, node_id_2]
+            
+            rr.log(
+                f"{prefix}/connection",
+                rr.LineStrips3D(
+                    strips=[[c1_orig, c2_orig]],
+                    colors=[[255, 255, 255]],
+                    radii=[point_radius * 0.5],
+                )
+            )
+
+    return {
+        "text": json.dumps(
+            {
+                "node_id_1": int(node_id_1),
+                "node_id_2": int(node_id_2),
+                "relative_movements": relative_movements,
+            }
+        ),
+    }
+
+
 spec_voxelize_scene = {
     "type": "function",
     "function": {
@@ -1508,6 +1637,14 @@ class GraphTools:
                     toolkit=self,
                 ),
                 spec_node_movement,
+            ),
+            "relative_movement": (
+                partial(
+                    relative_movement,
+                    centroids=self.point_o2n(self.centroids),
+                    toolkit=self,
+                ),
+                spec_relative_movement,
             ),
         }
 
