@@ -5,6 +5,7 @@ Train Qwen feature autoencoder (inspired by splattalk)
 from pathlib import Path
 import argparse
 from typing import List
+from datetime import datetime
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
@@ -56,7 +57,12 @@ def train(
 
     model = QwenAutoencoder(input_dim=full_dim, latent_dim=latent_dim).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    tb = SummaryWriter(checkpoint_dir)
+    
+    # Create timestamped tensorboard log directory
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    tb_log_dir = checkpoint_dir / timestamp
+    tb_log_dir.mkdir(parents=True, exist_ok=True)
+    tb = SummaryWriter(tb_log_dir)
 
     global_step = 0
     best_val = float('inf')
@@ -92,7 +98,7 @@ def train(
             best_val = val_loss
             torch.save(model.state_dict(), checkpoint_dir / 'best_ckpt.pth')
 
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 100 == 0:
             torch.save(model.state_dict(), checkpoint_dir / f"{epoch+1}_ckpt.pth")
 
 

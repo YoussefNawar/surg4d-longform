@@ -65,6 +65,7 @@ feature_selection: opacity # one of: [opacity, random]
 features_per_cluster: 64
 
 # lf decoding
+# TODO: is this problematic?
 decode_batch_size: 16384
 
 # graph

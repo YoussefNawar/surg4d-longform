@@ -64,7 +64,7 @@ def save_dim_reduced(clip: DictConfig, cfg: DictConfig, ae: QwenAutoencoder = No
         latent_mean_f = np.stack(
             [
                 np.mean(
-                    patch_lf[patch_s].reshape(-1, 3)[s.reshape(-1) == mask_id], axis=0
+                    patch_lf[patch_s].reshape(-1, cfg.autoencoder.latent_dim)[s.reshape(-1) == mask_id], axis=0
                 )
                 for mask_id in np.unique(s)
             ]

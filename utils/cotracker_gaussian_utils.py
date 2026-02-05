@@ -18,7 +18,6 @@ def load_cotracker_data(clip_dir: Path) -> Dict[str, torch.Tensor]:
     Returns:
         Dictionary containing torch tensors:
             - control_points_3d: (T, N_control_points, 3)
-            - control_point_validity: (T, N_control_points)
             - gaussian_control_point_indices: (N_gaussians, K)
             - gaussian_control_point_weights: (N_gaussians, K)
             - gaussian_positions_precomputed: (T, N_gaussians, 3)
@@ -30,7 +29,6 @@ def load_cotracker_data(clip_dir: Path) -> Dict[str, torch.Tensor]:
     
     data = {
         "control_points_3d": torch.load(cotracker_dir / "control_points_3d.pth"),
-        "control_point_validity": torch.load(cotracker_dir / "control_point_validity.pth"),
         "gaussian_control_point_indices": torch.load(cotracker_dir / "gaussian_control_point_indices.pth"),
         "gaussian_control_point_weights": torch.load(cotracker_dir / "gaussian_control_point_weights.pth"),
         "gaussian_positions_precomputed": torch.load(cotracker_dir / "gaussian_positions_precomputed.pth"),

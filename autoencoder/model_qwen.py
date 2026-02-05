@@ -25,26 +25,24 @@ class QwenAutoencoder(nn.Module):
 
         # Encoder with BN + GeLU between linear layers (except after final layer)
         encoder_layers = [
-            nn.Linear(input_dim, 1024),
+            nn.Linear(input_dim, 2048),
+            nn.BatchNorm1d(2048),
+            nn.GELU(),
+            nn.Linear(2048, 1024),
             nn.BatchNorm1d(1024),
             nn.GELU(),
-            nn.Linear(1024, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
             nn.GELU(),
-            nn.Linear(256, 32),
-            nn.BatchNorm1d(32),
-            nn.GELU(),
-            nn.Linear(32, latent_dim),
+            nn.Linear(512, latent_dim),
         ]
         self.encoder = nn.Sequential(*encoder_layers)
 
         # Decoder with GeLU activations between linear layers
         decoder_layers = [
-            nn.Linear(latent_dim, 64),
+            nn.Linear(latent_dim, 512),
             nn.GELU(),
-            nn.Linear(64, 256),
-            nn.GELU(),
-            nn.Linear(256, 1024),
+            nn.Linear(512, 1024),
             nn.GELU(),
             nn.Linear(1024, 2048),
             nn.GELU(),
