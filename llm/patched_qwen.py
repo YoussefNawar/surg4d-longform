@@ -316,6 +316,7 @@ class PatchedQwen3VLModel(Qwen3VLModel):
                         .expand(llm_grid_t, llm_grid_h, -1)
                         .flatten()
                     )
+                    # ! zero out h and w for positional encodings
                     if zero_image_hw:
                         h_index = torch.zeros_like(h_index, device=h_index.device, dtype=h_index.dtype)
                         w_index = torch.zeros_like(w_index, device=w_index.device, dtype=w_index.dtype)
