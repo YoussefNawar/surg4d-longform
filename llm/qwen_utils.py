@@ -298,7 +298,7 @@ def ask_qwen_about_image_features(
     seed: int = 42,
     max_new_tokens: int = NEW_TOKEN_LIMIT,
     max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
-    zero_positional_encodings: bool = False,
+    zero_positional_encodings: bool = True,
 ):
     messages = [
         {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
@@ -379,7 +379,7 @@ def generate_with_vision_features(
     seed: int = 42,
     max_new_tokens: int = NEW_TOKEN_LIMIT,
     max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
-    zero_positional_encodings: bool = False,
+    zero_positional_encodings: bool = True,
 ):
     """Generate text from vision features.
 
@@ -649,7 +649,7 @@ def generate_with_vision_features_agentic(
     seed: int = 42,
     max_new_tokens: int = NEW_TOKEN_LIMIT,
     max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
-    zero_positional_encodings: bool = False,
+    zero_positional_encodings: bool = True,
 ) -> Dict[str, Any]:
     """Generate with vision features in an agentic loop, executing tools until done.
 
@@ -951,7 +951,7 @@ def prompt_graph_agent(
     seed: int = 42,
     max_new_tokens: int = 8192,
     max_thinking_tokens: Optional[int] = None,
-    zero_positional_encodings: bool = False,
+    zero_positional_encodings: bool = True,
 ):
     """
     node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
