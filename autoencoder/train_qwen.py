@@ -98,7 +98,7 @@ def train(
             best_val = val_loss
             torch.save(model.state_dict(), checkpoint_dir / 'best_ckpt.pth')
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % 50 == 0:
             torch.save(model.state_dict(), checkpoint_dir / f"{epoch+1}_ckpt.pth")
 
 

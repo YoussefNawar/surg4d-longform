@@ -28,6 +28,7 @@ def train_splat(clip: DictConfig, cfg: DictConfig):
     os.environ["use_discrete_lang_f"] = cfg.splat.use_discrete_lang_f
     os.environ["num_lang_features"] = str(cfg.splat.num_lang_features)
     os.environ["lang_feature_dim"] = str(cfg.splat.lang_feature_dim)
+    os.environ["centers_num"] = str(cfg.splat.centers_num)
 
     # Experiment name is just the clip directory name
     exp_name = clip.name

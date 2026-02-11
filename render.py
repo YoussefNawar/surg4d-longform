@@ -55,22 +55,26 @@ to8b_np = lambda x: (255 * x).astype(np.uint8)
 from typing import Literal, Optional
 
 
-def pca_compress(rendering):
-    feature_map = rendering.permute(1, 2, 0).cpu().numpy()
-    # from PIL import Image
-    pca = PCA(n_components=3)
-    n = feature_map.shape[2]
-    w = feature_map.shape[0]
-    h = feature_map.shape[1]
-    feature_map_reshaped = feature_map.reshape(-1, n)
-    feature_map_pca = pca.fit_transform(feature_map_reshaped)
-    feature_map_pca_reshaped = feature_map_pca.reshape(w, h, 3)
-    # 将 feature map 归一化到 0-255
-    feature_map_normalized = (
-        feature_map_pca_reshaped - feature_map_pca_reshaped.min()
-    ) / (feature_map_pca_reshaped.max() - feature_map_pca_reshaped.min())
-    rendering = torch.from_numpy(feature_map_normalized)
-    return rendering
+def min_max_normalize(feature_map, min=None, max=None):
+    min = feature_map.min() if min is None else min
+    max = feature_map.max() if max is None else max
+    return (feature_map - min) / (max - min)
+
+
+def pca_compress(rendering, V=None, min=None, max=None):
+    feature_map = rendering
+    if V is None:
+        n = feature_map.shape[0]
+        print(f"[DEBUG] Feature map shape: {feature_map.shape}")
+        # Use the pytorch pca implementation
+        _, _, V = torch.pca_lowrank(feature_map.permute(1, 2, 0).reshape(-1, n))
+
+    reduced_feature_map = feature_map.permute(1, 2, 0) @ V[:, :3] # Bring features to (H, W, Dim) because V is (dim, reduced_dim after slicing)
+    print(f"after PCA: {reduced_feature_map.shape}") # (H, W, 3)
+    reduced_feature_map = reduced_feature_map.permute(2, 0, 1) # Bring features to (Dim, H, W)
+    print(f"after reshape after PCA: {reduced_feature_map.shape}")
+
+    return reduced_feature_map, V
 
 
 def render_set(
@@ -129,14 +133,17 @@ def render_set(
     makedirs(render_npy_path, exist_ok=True)
     makedirs(gts_npy_path, exist_ok=True)
     render_images = []
-    gt_list = []
-    gt_nonorm_list = []
+    # gt_list = []
+    # gt_nonorm_list = []
     render_list = []
     gt_images = []
     tosave_images_rendering = []
     print(f"name:{name}")
     print("point nums:", gaussians._xyz.shape[0])
     print(f"len:{len((views))}")
+
+    V = None
+
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         if idx == 0:
             time1 = time()
@@ -155,12 +162,12 @@ def render_set(
 
         if output_channel == "rgb":
             gt = view.original_image[0:3, :, :]
-            gt_nonorm_list.append(gt)
+            # gt_nonorm_list.append(gt)
 
         else:
             if ONLY_EVAL == "t":
                 gt, mask = None, None
-                gt_nonorm_list.append(gt)
+                # gt_nonorm_list.append(gt)
             else:
                 gt, mask = view.get_language_feature(
                     language_feature_dir=lf_path,
@@ -168,7 +175,7 @@ def render_set(
                     split=name,
                     data_type=data_type,
                 )
-                gt_nonorm_list.append(gt)
+                # gt_nonorm_list.append(gt)
                 if data_type != "dynerf" or name != "video":
                     gt = (gt + 1.0) / 2
             
@@ -184,16 +191,26 @@ def render_set(
                 if gt is not None and ONLY_EVAL == "f":
                     gt = gt[start_idx:end_idx, :, :]
             elif rendering.shape[0] > 3:
-                # Legacy behavior: take last 3 channels (instance features)
-                rendering = rendering[-3:, :, :]
                 if ONLY_EVAL == "t":
                     gt = None
                 else:
-                    gt = gt[-3:, :, :] if gt is not None else None
-        gt_list.append(gt)
+                    if idx == 0 and V is None:
+                        print(f"computing pca for gt of shape: {gt.shape}")
+                        # Compute pca
+                        gt, V_pca = pca_compress(gt) # 3, H, W
+                        V = V_pca
+                        gt = min_max_normalize(gt)
+                    else:
+                        # Currently, gt and rendered share the same PCA but compute their own min-max normalization
+                        gt, _ = pca_compress(gt, V)
+                        gt = min_max_normalize(gt)
+        # gt_list.append(gt)
         # Normalize rendering from [-1, 1] to [0, 1] for visualization (same as GT)
         if output_channel.startswith("lang"):
             rendering_viz = (rendering + 1.0) / 2
+            # Based on PCA of ground truth but with own min max normalization
+            rendering_viz, _ = pca_compress(rendering_viz, V)
+            rendering_viz = min_max_normalize(rendering_viz)
         else:
             rendering_viz = rendering
         tosave_images_rendering.append(rendering_viz)
@@ -208,29 +225,34 @@ def render_set(
     time2 = time()
     print("FPS:", (len(views) - 1) / (time2 - time1))
 
-    if not args.noimage:
-        print("Saving images")
-        if (data_type != "dynerf" or name != "video") and ONLY_EVAL == "f":
-            multithread_write(gt_list, gts_path)
-        multithread_write(tosave_images_rendering, render_path)
-    else:
-        print("For speed up, don't render image")
+    # if not args.noimage:
+    #     print("Saving images")
+    #     if (data_type != "dynerf" or name != "video") and ONLY_EVAL == "f":
+    #         multithread_write(gt_list, gts_path)
+    #     multithread_write(tosave_images_rendering, render_path)
+    # else:
+    #     print("For speed up, don't render image")
 
-    if not args.nonpy:
-        print("Saving npy")
+    # if not args.nonpy:
+    #     print("Saving npy")
 
-        for idx in tqdm(range(len(gt_nonorm_list)), desc="Saving progress"):
-            np.save(
-                os.path.join(render_npy_path, "{0:05d}".format(idx) + ".npy"),
-                render_list[idx].permute(1, 2, 0).cpu().numpy(),
-            )
-            if (data_type != "dynerf" or name != "video") and ONLY_EVAL == "f":
-                np.save(
-                    os.path.join(gts_npy_path, "{0:05d}".format(idx) + ".npy"),
-                    gt_nonorm_list[idx].permute(1, 2, 0).cpu().numpy(),
-                )
-    else:
-        print("For speed up, don't render npy")
+    #     for idx in tqdm(range(len(gt_nonorm_list)), desc="Saving progress"):
+    #         np.save(
+    #             os.path.join(render_npy_path, "{0:05d}".format(idx) + ".npy"),
+    #             render_list[idx].permute(1, 2, 0).cpu().numpy(),
+    #         )
+    #         if (data_type != "dynerf" or name != "video") and ONLY_EVAL == "f":
+    #             np.save(
+    #                 os.path.join(gts_npy_path, "{0:05d}".format(idx) + ".npy"),
+    #                 gt_nonorm_list[idx].permute(1, 2, 0).cpu().numpy(),
+    #             )
+    # else:
+    #     print("For speed up, don't render npy")
+
+    # Find min, max, mean, median across all render_images
+    render_images_np = np.array(render_images)
+    print(f"[DEBUG] Render images shape: {render_images_np.shape}, dtype: {render_images_np.dtype}, range: [{render_images_np.min()}, {render_images_np.max()}]")
+    print(f"[DEBUG] Render images mean: {render_images_np.mean()}, median: {np.median(render_images_np)}")
 
     if not args.novideo:
         print("Saving video")

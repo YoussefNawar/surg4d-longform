@@ -1,5 +1,5 @@
-# config_path: arguments/cholecseg8k/no_tv.py # this config disables total variation losses
-config_path: arguments/cholecseg8k/default.py
+config_path: arguments/cholecseg8k/no_tv.py # this config disables total variation losses
+# config_path: arguments/cholecseg8k/default.py
 
 depth_loss_weight: 1.0
 
@@ -16,8 +16,8 @@ dynamic_color: true
 # coarse iterations cut by 10x because we're only overfitting the feature heads on a single frame
 coarse_base_iterations: 0
 coarse_lang_iterations: 1
-fine_base_iterations: 10000
-fine_lang_iterations: 10000
+fine_base_iterations: 100
+fine_lang_iterations: 100
 
 # settings for simplifying coarse training for high quality initial depth map
 # TODO: fix this later, only for debugging
@@ -34,7 +34,7 @@ progressive_window:
 # each stage starts at 0 iterations and the lang stages consider these lists
 # ATTENTION: it's crucial to save the last iteration of fine lang here!
 test_iterations: [499, 999, 1499, 1999, 2999, 4999, 8999, 9999] # when to compute val metrics (logged to tensorboard)
-save_iterations: [10000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
+save_iterations: [100] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
 checkpoint_iterations: [] # when to save full checkpoints (with optimizer states for resuming)
 
 render_outputs:
@@ -44,12 +44,13 @@ render_outputs:
   fine_lang: true
 
 # environment variables
-language_feature_hiddendim: 128  # total dim = num_lang_features * lang_feature_dim
+language_feature_hiddendim: 32 # total dim = num_lang_features * lang_feature_dim
 use_discrete_lang_f: f
+centers_num: 10  # number of discrete deformation states to interpolate between
 
 # multiple independent language features (e.g., patch + instance)
 num_lang_features: 2  # number of independent language feature types
-lang_feature_dim: 64   # dimension of each feature (must match autoencoder latent_dim)
+lang_feature_dim: 16   # dimension of each feature (must match autoencoder latent_dim)
 
 # model initialization
 rezero_init: false  # Initialize deformation deltas to 0 using ReZero scaling

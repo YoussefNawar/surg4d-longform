@@ -4,6 +4,7 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from typing import List, Optional
 import re
+from sklearn.decomposition import PCA
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import SH2RGB
 
@@ -61,6 +62,19 @@ def log_points_through_time(
     uniformity = np.repeat(uniformity[:, None], 3, axis=-1)
     # print(np.histogram(uniformity, bins=10))
 
+    # Fit PCA once on all features across all timesteps for consistent visualization
+    pca_patch = None
+    pca_instance = None
+    if patch_lf_through_time.shape[-1] > 3:
+        # Flatten all timesteps to fit PCA on full distribution
+        all_patch_lf = patch_lf_through_time.reshape(-1, patch_lf_through_time.shape[-1])
+        pca_patch = PCA(n_components=3)
+        pca_patch.fit(all_patch_lf)
+    if instance_lf_through_time.shape[-1] > 3:
+        all_instance_lf = instance_lf_through_time.reshape(-1, instance_lf_through_time.shape[-1])
+        pca_instance = PCA(n_components=3)
+        pca_instance.fit(all_instance_lf)
+
     for i in range(len(timesteps)):
         rr.set_time("timestep", sequence=i)
         pos = pos_through_time[i]
@@ -71,9 +85,15 @@ def log_points_through_time(
         mean_radius = max(scene_extent * 0.015, point_radius * 3.0)
 
         # Use timestep-specific language features if available
+        # Reduce to 3D for RGB visualization using pre-fitted PCA
         cols_patch_t = patch_lf_through_time[i]
+        if pca_patch is not None:
+            cols_patch_t = pca_patch.transform(cols_patch_t)
         cols_patch_t = (((cols_patch_t + 1.0) / 2.0).clip(0.0, 1.0) * 255.0).astype(np.uint8)
+        
         cols_instance_t = instance_lf_through_time[i]
+        if pca_instance is not None:
+            cols_instance_t = pca_instance.transform(cols_instance_t)
         cols_instance_t = (((cols_instance_t + 1.0) / 2.0).clip(0.0, 1.0) * 255.0).astype(np.uint8)
 
         rr.log(

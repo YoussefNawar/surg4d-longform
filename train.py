@@ -42,6 +42,8 @@ from typing import Literal
 from loguru import logger
 import wandb
 
+from torch.nn import CosineEmbeddingLoss
+
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 
 try:
@@ -233,7 +235,7 @@ def scene_reconstruction(
         viewpoint_stack = [i for i in train_cams]
         temp_list = copy.deepcopy(viewpoint_stack)
 
-    batch_size = opt.batch_size if "base" in stage else 1
+    batch_size = opt.batch_size_rgb if "base" in stage else opt.batch_size_language
     logger.info("data loading done")
 
     if opt.dataloader:
@@ -484,6 +486,9 @@ def scene_reconstruction(
                         data_type=scene.dataset_type,
                     )
                 )
+                # Match mask dimensions to feature dimensions
+                feature_dim = gt_language_feature.shape[0]
+                language_feature_mask = language_feature_mask.repeat(feature_dim, 1, 1)
                 gt_language_features.append(gt_language_feature)
             end_time = time.time()
             total_time_ongt += end_time - start_time
@@ -522,24 +527,20 @@ def scene_reconstruction(
                 Ll1 += args.depth_loss_weight * depth_loss
         # Language feature stage
         else:
-            Ll1 = args.lam * l1_loss(
-                language_feature_tensor * language_feature_mask_tensor,
-                gt_language_feature_tensor * language_feature_mask_tensor,
-            )
-            resdict["lang_l1"] = Ll1.item()
+            Ll1 = 0.0
+            cosine_similarity_loss = CosineEmbeddingLoss() 
 
-            # if os.getenv("addcosloss", "f") == "t":
-            # # TODO: compare L1 and cos and make sure to put in configs
-            # Ll1 = 0.0
-            # # TODO: experiment with what this masking does?
-            # language_feature_mask_tensor = torch.ones_like(language_feature_mask_tensor)
-            # cosloss = cos_loss(
-            #     language_feature_tensor * language_feature_mask_tensor,
-            #     gt_language_feature_tensor * language_feature_mask_tensor,
-            # )
-            # print(f"weighted cosloss: {args.beta * cosloss.item()} with beta {args.beta}")
-            # Ll1 += args.beta * cosloss
-            # resdict["lang_l1"] = cosloss.item()
+            masked_language_feature_tensor = language_feature_tensor * language_feature_mask_tensor
+            masked_gt_language_feature_tensor = gt_language_feature_tensor * language_feature_mask_tensor
+
+            # Cosine similarity loss expects (N, D) where N are the samples and D is the embedding dimension
+            # Features are currently (B * C, H, W) -> (B, C, H * W) -> (H * W * B, C)
+            masked_language_feature_tensor = masked_language_feature_tensor.reshape(batch_size, feature_dim, -1).permute(2, 0, 1).reshape(-1, feature_dim)
+            masked_gt_language_feature_tensor = masked_gt_language_feature_tensor.reshape(batch_size, feature_dim, -1).permute(2, 0, 1).reshape(-1, feature_dim)
+            target = torch.ones(masked_language_feature_tensor.shape[0], device=masked_language_feature_tensor.device)
+            cosloss = cosine_similarity_loss(masked_language_feature_tensor, masked_gt_language_feature_tensor, target)
+            Ll1 += args.beta * cosloss
+            resdict["lang_l1"] = cosloss.item()
 
             if joint_train:
                 Ll1_rgb = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])

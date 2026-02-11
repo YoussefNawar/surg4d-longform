@@ -163,7 +163,8 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_coarse = 0.005
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
-        self.batch_size=1
+        self.batch_size_rgb=8
+        self.batch_size_language=8
         self.add_point=False
         super().__init__(parser, "Optimization Parameters")
 

@@ -2,7 +2,7 @@ defaults:
   - clips: final_dataset
   - preprocessing: qwen3
   - feature_extraction: qwen3
-  - autoencoder: qwen3_global
+  - autoencoder: qwen3
   - splat: no_densify
   - graph_extraction: vanilla_qwen3
   - eval: default

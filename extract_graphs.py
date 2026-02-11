@@ -28,6 +28,7 @@ from rerun_utils import (
     log_points_through_time,
     log_graph_structure_through_time,
 )
+from utils.sh_utils import SH2RGB
 from utils.gaussian_loading_utils import get_latest_model_iteration
 
 
@@ -78,6 +79,9 @@ def load_gaussian_model(
     os.environ["use_discrete_lang_f"] = cfg.graph_extraction.use_discrete_lang_f
     os.environ["num_lang_features"] = str(cfg.graph_extraction.num_lang_features)
     os.environ["lang_feature_dim"] = str(cfg.graph_extraction.lang_feature_dim)
+    # centers_num is used by discrete_coff_generator in deformation network
+    if hasattr(cfg.splat, "centers_num"):
+        os.environ["centers_num"] = str(cfg.splat.centers_num)
 
     clip_dir = Path(cfg.preprocessed_root) / clip.name
     model_path = Path(cfg.output_root) / clip.name
@@ -164,6 +168,11 @@ def load_gaussian_model(
 
     if args.iteration == -1:
         args.iteration = get_latest_model_iteration(cfg)
+
+    # Set centers_num from config if available (needed for discrete_coff_generator)
+    # This must be set before creating GaussianModel
+    if hasattr(cfg.splat, "centers_num"):
+        os.environ["centers_num"] = str(cfg.splat.centers_num)
 
     # Load model
     hyper = hyperparam.extract(args)
@@ -1255,6 +1264,11 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     # save outputs
     logger.info(f"Saving outputs...")
     out = graph_output_dir
+    # Save per-gaussian RGB colors derived from SH DC coefficients (same as rerun RGB logging).
+    dc_sh = gaussians._features_dc.detach().cpu().numpy()  # (N, 1, 3)
+    colors_rgb = SH2RGB(dc_sh[:, 0, :])  # (N, 3) in [0,1]
+    colors_rgb_uint8 = (np.clip(colors_rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+    np.save(out / "colors_rgb.npy", colors_rgb_uint8)
     np.savez(
         out / "c_qwen_feats.npz", **cluster_feats_dict_patch
     )  # qwen features per cluster through time (cluster_id -> (timesteps, n_feats, 3584))
