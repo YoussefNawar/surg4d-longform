@@ -17,9 +17,9 @@ learning_rates:
   position_final: 0.0000016 # xyz Adam LR at end of schedule
   position_delay_mult: 0.01 # xyz LR schedule warmup multiplier
   position_max_steps: 20000 # xyz/deformation/grid LR schedule horizon in optimizer steps
-  deformation_init: 0.00016 # deformation MLP LR at start (scheduled)
-  deformation_final: 0.000016 # deformation MLP LR at end of schedule
-  deformation_delay_mult: 0.01 # deformation/grid LR schedule warmup multiplier
+  deformation_init: 0.00016 # deformation MLP LR at start (scheduled), also used by lang deformation heads
+  deformation_final: 0.000016 # deformation MLP LR at end of schedule, also used by lang deformation heads
+  deformation_delay_mult: 0.01 # deformation/grid LR schedule warmup multiplier, also used by lang deformation heads
   grid_init: 0.0016 # deformation grid LR at start (scheduled)
   grid_final: 0.00016 # deformation grid LR at end of schedule
   feature: 0.0025 # SH feature LR for f_dc (f_rest uses feature/20 internally)
@@ -28,7 +28,7 @@ learning_rates:
   scaling: 0.005 # scale LR
   rotation: 0.001 # rotation LR
 
-tensorboard_subdir: "lang_deform_hidden_256" # TensorBoard subdir prefix; actual folder is "<prefix>_<timestamp>"
+tensorboard_subdir: "pe_4_4layers" # TensorBoard subdir prefix; actual folder is "<prefix>_<timestamp>"
 
 # CoTracker3 control point settings
 cotracker_k_neighbors: 3 # number of nearest control points per Gaussian
@@ -43,7 +43,7 @@ dynamic_color: true
 # coarse iterations cut by 10x because we're only overfitting the feature heads on a single frame
 coarse_base_iterations: 0
 coarse_lang_iterations: 1
-fine_base_iterations: 5000
+fine_base_iterations: 5000 # ! tmp while experimenting
 fine_lang_iterations: 5000
 
 # settings for simplifying coarse training for high quality initial depth map
@@ -82,6 +82,7 @@ centers_num: 10  # number of discrete deformation states to interpolate between
 num_lang_features: 2  # number of independent language feature types
 lang_feature_dim: 16   # dimension of each feature (must match autoencoder latent_dim)
 lang_deform_width: 256  # hidden width of language deformation heads (independent from backbone net_width)
+lang_timebase_pe: 4    # frequency bands for language time PE (higher = more temporal bandwidth than main timebase_pe=4)
 
 # model initialization
 rezero_init: false  # Initialize deformation deltas to 0 using ReZero scaling

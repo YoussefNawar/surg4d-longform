@@ -71,12 +71,15 @@ class Deformation(nn.Module):
         language_feature_hiddendim = int(os.getenv("language_feature_hiddendim", 6))  # total dim for backward compat
         
         # Create independent deformation head for each language feature
-        # Each head takes its own feature + time positional encoding as input
+        # Each head takes its own feature + language time positional encoding as input
+        self.lang_timebase_pe = int(os.getenv("lang_timebase_pe", str(self.args.timebase_pe)))
         lang_W = self.lang_deform_width
         self.lang_deforms = nn.ModuleList([
             nn.Sequential(
                 nn.ReLU(),
-                nn.Linear(self.args.timebase_pe*2+1+self.lang_feature_dim, lang_W),
+                nn.Linear(self.lang_timebase_pe*2+1+self.lang_feature_dim, lang_W),
+                nn.ReLU(),
+                nn.Linear(lang_W, lang_W),
                 nn.ReLU(),
                 nn.Linear(lang_W, lang_W),
                 nn.ReLU(),
@@ -129,20 +132,21 @@ class Deformation(nn.Module):
     @property
     def get_empty_ratio(self):
         return self.ratio
-    def forward(self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None,shs_emb=None,lang_emb=None, time_feature=None, time_sel_emb=None,time_pos_emb=None,init_centers=False):
+    def forward(self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None,shs_emb=None,lang_emb=None, time_feature=None, time_sel_emb=None,time_pos_emb=None,lang_time_pos_emb=None,init_centers=False):
         """
             time_pos_emb: (n,2*timebase_pe+1)
+            lang_time_pos_emb: (n,2*lang_timebase_pe+1) - higher bandwidth time PE for language heads
         """
         if time_sel_emb is None:
             return self.forward_static(rays_pts_emb[:,:3])
         else:
-            return self.forward_dynamic(rays_pts_emb, scales_emb, rotations_emb, opacity, shs_emb, lang_emb, time_feature, time_sel_emb,time_pos_emb, init_centers)
+            return self.forward_dynamic(rays_pts_emb, scales_emb, rotations_emb, opacity, shs_emb, lang_emb, time_feature, time_sel_emb,time_pos_emb, lang_time_pos_emb, init_centers)
 
     def forward_static(self, rays_pts_emb):
         grid_feature = self.grid(rays_pts_emb[:,:3])
         dx = self.static_mlp(grid_feature)
         return rays_pts_emb[:, :3] + dx
-    def forward_dynamic(self,rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, lang_emb, time_feature, time_sel_emb,time_pos_emb,init_centers=False):
+    def forward_dynamic(self,rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, lang_emb, time_feature, time_sel_emb,time_pos_emb, lang_time_pos_emb, init_centers=False):
         
         hidden = self.query_time(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_sel_emb)
 
@@ -229,12 +233,12 @@ class Deformation(nn.Module):
                     if os.getenv("use_tribute_dlang","f") == "t":
                         # Use hidden features only (no lang input to MLP)
                         dlang_i = self.lang_alphas[i] * self.lang_deforms[i](
-                            torch.cat([torch.zeros_like(feat_in), time_pos_emb], dim=1)
+                            torch.cat([torch.zeros_like(feat_in), lang_time_pos_emb], dim=1)
                         )
                     else:
                         # Use feature + time positional encoding as input
                         dlang_i = self.lang_alphas[i] * self.lang_deforms[i](
-                            torch.cat([feat_in, time_pos_emb], dim=1)
+                            torch.cat([feat_in, lang_time_pos_emb], dim=1)
                         )
                     
                     if os.getenv("no_resnet",'f') == 't':
@@ -280,6 +284,8 @@ class deform_network(nn.Module):
         nn.Linear(timenet_width, timenet_output))
         self.deformation_net = Deformation(W=net_width, D=defor_depth, input_ch=(3)+(3*(posbase_pe))*2, grid_pe=grid_pe, input_ch_time=timenet_output, args=args)
         self.register_buffer('time_poc', torch.FloatTensor([(2**i) for i in range(timebase_pe)]))
+        lang_timebase_pe = int(os.getenv("lang_timebase_pe", str(timebase_pe)))
+        self.register_buffer('lang_time_poc', torch.FloatTensor([(2**i) for i in range(lang_timebase_pe)]))
         self.register_buffer('pos_poc', torch.FloatTensor([(2**i) for i in range(posbase_pe)]))
         self.register_buffer('rotation_scaling_poc', torch.FloatTensor([(2**i) for i in range(scale_rotation_pe)]))
         self.register_buffer('opacity_poc', torch.FloatTensor([(2**i) for i in range(opacity_pe)]))
@@ -301,6 +307,7 @@ class deform_network(nn.Module):
         return points
     def forward_dynamic(self, point, scales=None, rotations=None, opacity=None, shs=None,lang=None, times_sel=None,init_centers=False):
         times_emb = poc_fre(times_sel, self.time_poc)
+        lang_times_emb = poc_fre(times_sel, self.lang_time_poc)
         point_emb = poc_fre(point,self.pos_poc)
         scales_emb = poc_fre(scales,self.rotation_scaling_poc)
         rotations_emb = poc_fre(rotations,self.rotation_scaling_poc)
@@ -314,6 +321,7 @@ class deform_network(nn.Module):
                                                 None,
                                                 times_sel,
                                                 times_emb,
+                                                lang_times_emb,
                                                 init_centers)
         return means3D, scales, rotations, opacity, shs, lang, coff
     def get_mlp_parameters(self):

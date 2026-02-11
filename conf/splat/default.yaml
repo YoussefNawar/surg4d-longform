@@ -71,6 +71,7 @@ use_discrete_lang_f: f
 num_lang_features: 2  # number of independent language feature types
 lang_feature_dim: 3   # dimension of each feature (must match autoencoder latent_dim)
 lang_deform_width: 128  # hidden width of language deformation heads (independent from backbone net_width)
+lang_timebase_pe: 10    # frequency bands for language time PE (higher = more temporal bandwidth than main timebase_pe=4)
 
 # model initialization
 rezero_init: false  # Initialize deformation deltas to 0 using ReZero scaling

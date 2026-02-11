@@ -1131,7 +1131,7 @@ def training(
                 args,
                 timer,
             )
-        if opt.fine_base_iterations > 0 and opt.fine_lang_iterations > 0:
+        if opt.fine_lang_iterations > 0:
             logger.info(
                 "Reloading best checkpoint from fine-base before starting fine-lang"
             )
