@@ -13,7 +13,7 @@ loss_weights:
   plane_tv: 0.0 # fine stages: weight on spatial total-variation regularization of deformation planes
 
 learning_rates:
-  lr_max_steps: 20000 # used by all scheduled learning rates
+  lr_max_steps: 10000 # used by all scheduled learning rates
   position_init: 0.00016 # xyz initial
   position_final: 0.0000016 # xyz final
   position_delay_mult: 0.01 # xyz delay multiplier
@@ -28,7 +28,7 @@ learning_rates:
   scaling: 0.005 # scale
   rotation: 0.001 # rotation
 
-tensorboard_subdir: "states15_iter20k" # TensorBoard subdir prefix; actual folder is "<prefix>_<timestamp>"
+tensorboard_subdir: "states15_iter10k" # TensorBoard subdir prefix; actual folder is "<prefix>_<timestamp>"
 
 # CoTracker3 control point settings
 cotracker_k_neighbors: 3 # number of nearest control points per Gaussian
@@ -47,8 +47,8 @@ dynamic_grid: true
 # coarse iterations cut by 10x because we're only overfitting the feature heads on a single frame
 coarse_base_iterations: 2000
 coarse_lang_iterations: 2000
-fine_base_iterations: 20000
-fine_lang_iterations: 20000
+fine_base_iterations: 10000
+fine_lang_iterations: 10000
 
 # settings for simplifying coarse training for high quality initial depth map
 # TODO: fix this later, only for debugging
@@ -69,7 +69,7 @@ progressive_window:
 # each stage starts at 0 iterations and the lang stages consider these lists
 # ATTENTION: it's crucial to save the last iteration of fine lang here!
 test_iterations: [499, 999, 1499, 1999, 2999, 4999, 8999, 9999] # when to compute val metrics (logged to tensorboard)
-save_iterations: [20000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
+save_iterations: [10000] # when to save model checkpoints to disk (for rendering, graph extraction, etc.)
 checkpoint_iterations: [] # when to save full checkpoints (with optimizer states for resuming)
 
 save_best_checkpoint: true

@@ -21,7 +21,7 @@ from compute_metrics import (
     compute_temporal_metrics,
     compute_triplets_metrics,
 )
-from llm.qwen_utils import get_patched_qwen
+from llm.qwen_utils import get_patched_qwen3
 
 
 import sys
@@ -210,10 +210,9 @@ def main():
 
         if not cfg.skip_eval:
             # Load models for eval
-            model, processor = get_patched_qwen(
-                qwen_version=cfg.eval.qwen_version,
-                use_bnb_4bit=cfg.eval.get("use_bnb_4bit", False),
-                use_bnb_8bit=cfg.eval.get("use_bnb_8bit", False),
+            model, processor = get_patched_qwen3(
+                size=cfg.eval.qwen3_size,
+                use_fp8=cfg.eval.qwen3_use_fp8,
             )
 
             # triplets and temporal eval
