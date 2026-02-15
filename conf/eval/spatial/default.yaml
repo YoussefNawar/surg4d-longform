@@ -2,51 +2,11 @@ gt_filename: ${preprocessing.spatial_labels_output_filename}
 output_dir: ${eval.output_dir}/spatial
 dump_visualizations: true
 visualizations_dir: ${eval.output_dir}/spatial_viz
-
-# Tool visualization (null to disable, directory path to enable)
 tool_viz_dir: ${eval.output_dir}/tool_viz/spatial
 
-layers: [0, 1, 2, 12, 16, 20, 24, 28, 31] # 0 to 31
-top_k_scores: 50 # for attn based methods wo/ refinement
+methods: ["frame_direct", "graph_agent"]
 
-# which methods to run (subset of: frame_attn, frame_attn_refine, frame_direct, graph_agent)
-methods:
-  # - frame_attn
-  # - frame_attn_refine
-  - frame_direct
-  - graph_agent
-
-
-# ============================================================================
-# FRAME_ATTN (attention scores over frame patches)
-# ============================================================================
-frame_attn_system_prompt: |
-  You are an expert surgical assistant. Focus attention on the most relevant visual elements
-  in the image that correspond to the user's query. No explanations are needed.
-frame_attn_prompt_template: "Locate {substring} in the scene."
-
-# ============================================================================
-# FRAME_ATTN_REFINE (2D attention score proposal, final pixel guess by qwen)
-# ============================================================================
-frame_attn_refine_attn_layer: 20
-frame_attn_refine_include_scores_in_context: false
-frame_attn_refine_max_proposals: 10
-frame_attn_refine_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - You have access to an image of the scene and coordinate proposals extracted from attention scores.
-
-  # Rules
-  - Think briefly, do not spend too much time.
-frame_attn_refine_prompt_template: |
-  Locate '{substring}' in the image.
-
-  Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
-  Example output (format only): ... {{"x": X, "y": Y}} ...
-
-# ============================================================================
-# FRAME_DIRECT (directly ask qwen to return a pixel on the image)
-# ============================================================================
+# frame direct
 frame_direct_system_prompt: |
   # Task
   - You are an expert visceral surgeon analyzing a cholecystectomy scene.
@@ -55,14 +15,12 @@ frame_direct_system_prompt: |
   # Rules
   - Think briefly, do not spend too much time.
 frame_direct_prompt_template: |
-  Locate '{substring}' in the image.
+  {question}
 
   Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
   Example output (format only): ... {{"x": X, "y": Y}} ...
 
-# ============================================================================
-# GRAPH_AGENT (agentic exploration with tools)
-# ============================================================================
+# graph agent
 graph_agent_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
 graph_agent_autoencoder_full_dim: ${autoencoder.full_dim}
 graph_agent_autoencoder_latent_dim: ${autoencoder.latent_dim}
@@ -71,7 +29,7 @@ graph_agent_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_d
 graph_agent_max_iterations: 20
 graph_agent_tools:
   - name: node_overlap_position_at_time
-    max_calls: null  # infinite
+    max_calls: null
   - name: inspect_highres_node_at_time
     max_calls: 5
   - name: voxelize_scene
@@ -101,7 +59,7 @@ graph_agent_system_prompt: |
   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
   - Think briefly, do not spend too much time on each turn.
 graph_agent_prompt_template: |
-  Identify the 3D location of '{substring}' in the scene.
+  {question}
 
   Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
   Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...

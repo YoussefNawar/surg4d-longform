@@ -1,9 +1,9 @@
 defaults:
-  - temporal: default
-  # - spatial: default
+  # - temporal: default
+  - spatial: default
   - _self_
-
-spatial: null
+temporal: null
+# spatial: null
 
 annotations_root: data/annotations
 
@@ -13,6 +13,8 @@ qwen3_use_fp8: ${feature_extraction.qwen3_use_fp8}
 
 # Video metadata for all evaluations
 video_fps: 25  # Original video framerate (Cholec80 is 25 fps)
+annotation_stride: 4
+n_timesteps: 20
 
 # Required output directory for benchmark results
 output_dir: ${output_root}/predictions_tmp # ! tmp

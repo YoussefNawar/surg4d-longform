@@ -26,6 +26,7 @@ from llm.tools import GraphTools
 from autoencoder.model_qwen import QwenAutoencoder
 from benchmark.serialization_utils import sanitize_tool_calls
 from benchmark.serialization_utils import parse_json
+from benchmark.graph_utils import get_coord_transformations
 
 
 def load_video_frames(video_dir: Path, images_subdir: str) -> "Tuple[List[Path], int]":
@@ -108,160 +109,6 @@ def get_num_timesteps_from_graph(graph_path: Path) -> int:
     return int(graph_data['adjacency_matrices'].shape[0])
 
 
-def parse_single_frame(response: str, query_type: str) -> Optional[Dict]:
-    """Parse response for action_onset or action_offset.
-    
-    Args:
-        response: Model response text
-        query_type: Type of query (for unwrapping nested JSON)
-        
-    Returns:
-        Dict with 'timestep' key or None
-    """
-    try:
-        start = response.find('{')
-        end = response.rfind('}') + 1
-        if start >= 0 and end > start:
-            json_str = response[start:end]
-            data = json.loads(json_str)
-            
-            if 'timestep' not in data and isinstance(data, dict):
-                inner = data.get(query_type)
-                if isinstance(inner, dict):
-                    data = inner
-
-            # Support both "timestep" (old format) and "second" (new Qwen3 format)
-            if 'timestep' in data:
-                timestep_val = data['timestep']
-                if isinstance(timestep_val, (int, float)):
-                    return {'timestep': int(timestep_val)}
-            elif 'second' in data:
-                second_val = data['second']
-                if isinstance(second_val, (int, float)):
-                    return {'second': float(second_val)}
-        return None
-    except Exception:
-        return None
-
-
-def parse_frame_ranges(response: str, query_type: str) -> Optional[Dict]:
-    """Parse response for action_duration.
-    
-    Args:
-        response: Model response text
-        query_type: Type of query (for unwrapping nested JSON)
-        
-    Returns:
-        Dict with 'ranges' or 'second_ranges' key or None
-    """
-    try:
-        start = response.find('{')
-        end = response.rfind('}') + 1
-        if start >= 0 and end > start:
-            json_str = response[start:end]
-            data = json.loads(json_str)
-            
-            if 'ranges' not in data and 'second_ranges' not in data and isinstance(data, dict):
-                inner = data.get(query_type)
-                if isinstance(inner, dict):
-                    data = inner
-                    
-            # Support both "ranges" (old format) and "second_ranges" (new Qwen3 format)
-            if 'ranges' in data:
-                ranges = []
-                for r in data['ranges']:
-                    if isinstance(r, list) and len(r) == 2:
-                        ranges.append([int(r[0]), int(r[1])])
-                if ranges:
-                    return {'ranges': ranges}
-            elif 'second_ranges' in data:
-                second_ranges = []
-                for r in data['second_ranges']:
-                    if isinstance(r, list) and len(r) == 2:
-                        second_ranges.append([float(r[0]), float(r[1])])
-                if second_ranges:
-                    return {'second_ranges': second_ranges}
-        return None
-    except Exception:
-        return None
-
-
-def parse_ordered_events(response: str, query_type: str) -> Optional[Dict]:
-    """Parse response for multiple_event_ordering.
-    
-    Args:
-        response: Model response text
-        query_type: Type of query (for unwrapping nested JSON)
-        
-    Returns:
-        Dict with 'events' key or None
-    """
-    try:
-        start = response.find('{')
-        end = response.rfind('}') + 1
-        if start >= 0 and end > start:
-            json_str = response[start:end]
-            data = json.loads(json_str)
-            
-            if 'events' not in data and isinstance(data, dict):
-                inner = data.get(query_type)
-                if isinstance(inner, dict):
-                    data = inner
-                    
-            if 'events' in data and isinstance(data['events'], list):
-                events = []
-                for event in data['events']:
-                    if isinstance(event, dict) and 'order' in event and 'frame_range' in event:
-                        events.append({
-                            'order': int(event['order']),
-                            'description': event.get('description', ''),
-                            'frame_range': [int(event['frame_range'][0]), int(event['frame_range'][1])]
-                        })
-                if events:
-                    events.sort(key=lambda x: x['order'])
-                    return {'events': events}
-        return None
-    except Exception:
-        return None
-
-
-def parse_count_and_ranges(response: str, query_type: str) -> Optional[Dict]:
-    """Parse response for count_frequency.
-    
-    Args:
-        response: Model response text
-        query_type: Type of query (for unwrapping nested JSON)
-        
-    Returns:
-        Dict with 'count' and 'occurrences' keys or None
-    """
-    try:
-        start = response.find('{')
-        end = response.rfind('}') + 1
-        if start >= 0 and end > start:
-            json_str = response[start:end]
-            data = json.loads(json_str)
-            
-            if 'count' not in data and isinstance(data, dict):
-                inner = data.get(query_type)
-                if isinstance(inner, dict):
-                    data = inner
-                    
-            if 'count' in data:
-                occurrences = []
-                if 'occurrences' in data and isinstance(data['occurrences'], list):
-                    for occ in data['occurrences']:
-                        if isinstance(occ, list) and len(occ) >= 2:
-                            occurrences.append([int(occ[0]), int(occ[1])])
-                return {
-                    'count': int(data['count']),
-                    'occurrences': occurrences
-                }
-        return None
-    except Exception:
-        return None
-
-
 def multiframe_queries(
     model,
     processor,
@@ -336,21 +183,13 @@ def multiframe_queries(
         else:
             raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
 
-        # Build message history for consistency with graph_agent
-        # (multiframe doesn't support tools, so this is just the initial query and response)
-        message_history = [
-            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-            {"role": "user", "content": [{"type": "text", "text": prompt}]},
-            {"role": "assistant", "content": [{"type": "text", "text": response}]}
-        ]
-        
         results.append({
             'id': query_anno['id'],
             'type': query_type,
             'query': query_anno['query'],
             'predicted': prediction,
             'raw_response': response,
-            'message_history': message_history,
+            'message_history': [],
             'tool_calls': [],
         })
         
@@ -408,6 +247,8 @@ def graph_agent_queries(
     patch_latents_through_time = np.load(patch_latents_path)
     adjacency = np.load(adjacency_path)
     bhattacharyya_coeffs = np.load(bhattacharyya_path)
+
+    point_o2n, _, distance_o2n, _ = get_coord_transformations(positions)
 
     # Load autoencoder for highres inspection tools (following spatial pattern)
     if cfg.eval.temporal.graph_agent_use_global_autoencoder:
@@ -498,9 +339,9 @@ def graph_agent_queries(
             question=prompt,
             node_feats=node_feats_npz,
             initial_timestep_idx=0,  # Start at first timestep, agent explores temporally
-            node_centers=node_centers,
-            node_centroids=node_centroids,
-            node_extents=node_extents,
+            node_centers=point_o2n(node_centers),
+            node_centroids=point_o2n(node_centroids),
+            node_extents=distance_o2n(node_extents),
             model=model,
             processor=processor,
             tools=tools,

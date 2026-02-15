@@ -1,11 +1,15 @@
 defaults:
-  - temporal: default
-  # - spatial: default
+  # - temporal: default
+  - spatial: default
   - _self_
-
-spatial: null
+temporal: null
+# spatial: null
 
 annotations_root: data/annotations
+
+video_fps: ${eval.video_fps}
+annotation_stride: ${eval.annotation_stride}
+n_timesteps: ${eval.n_timesteps}
 
 # Required output directory for benchmark results
 output_dir: ${output_root}/metrics_tmp # ! tmp

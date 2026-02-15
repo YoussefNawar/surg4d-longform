@@ -3,13 +3,13 @@ from pathlib import Path
 from omegaconf import DictConfig
 import torch
 import numpy as np
-from typing import List, Dict, Any, Optional, Callable
+from typing import Dict, Any
 import cv2
 import re
-import json
+from PIL import Image
 
 from benchmark.graph_utils import get_coord_transformations
-from benchmark.serialization_utils import sanitize_tool_calls
+from benchmark.serialization_utils import sanitize_tool_calls, parse_json
 from llm.qwen_utils import (
     prompt_graph_agent,
     ask_qwen_about_image,
@@ -18,29 +18,6 @@ from llm.tools import GraphTools
 from autoencoder.model_qwen import QwenAutoencoder
 from scene.dataset_readers import CameraInfo, readColmapSceneInfo
 from scene.cameras import Camera
-from PIL import Image
-
-
-def find_image_path(images_dir: Path, frame_number: int) -> Optional[Path]:
-    """Find image file for a given frame number, supporting both JPG and PNG formats.
-    
-    Args:
-        images_dir: Directory containing images
-        frame_number: Frame number (0-indexed)
-    
-    Returns:
-        Path to image file if found, None otherwise
-    """
-    frame_stem = f"frame_{frame_number:06d}"
-    jpg_path = images_dir / f"{frame_stem}.jpg"
-    png_path = images_dir / f"{frame_stem}.png"
-    
-    if jpg_path.exists():
-        return jpg_path
-    elif png_path.exists():
-        return png_path
-    else:
-        return None
 
 
 def project_3d_to_2d(
@@ -148,38 +125,8 @@ def get_proj_matrix_from_timestep(
     full_proj_matrix = camera.full_proj_transform
     return full_proj_matrix, camera.image_width, camera.image_height
 
-
-def _parse_point_from_json(text: str) -> Optional[List[float]]:
-    """Extract a single 3D point [x, y, z] from a JSON object in the given text.
-
-    The model is instructed to return pure JSON, but we make this robust by:
-      1) locating the first JSON object in the text, attempting json.loads
-      2) falling back to regex-based triple float extraction if needed
-    """
-
-    # Try to find a JSON object in the text
-    try:
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            candidate = text[first_brace : last_brace + 1]
-            obj = json.loads(candidate)
-            # Accept either {"x":..,"y":..,"z":..} or {"point":{"x":..,"y":..,"z":..}}
-            if isinstance(obj, dict):
-                if all(k in obj for k in ("x", "y", "z")):
-                    return [float(obj["x"]), float(obj["y"]), float(obj["z"])]
-                if "point" in obj and isinstance(obj["point"], dict):
-                    point = obj["point"]
-                    if all(k in point for k in ("x", "y", "z")):
-                        return [float(point["x"]), float(point["y"]), float(point["z"])]
-    except Exception:
-        pass
-
-    return None
-
-
-def _qwen3_coords_to_pixels(
-    coords: np.ndarray, img_width: int, img_height: int
+def qwen3_coords_to_pixels(
+    x: float, y: float, img_width: int, img_height: int
 ) -> np.ndarray:
     """Convert Qwen3's normalized [0, 1000] coordinates back to pixel coordinates.
     
@@ -191,188 +138,13 @@ def _qwen3_coords_to_pixels(
     Returns:
         Array of shape (N, 2) with [x, y] pixel coordinates
     """
-    coords_array = np.array(coords)
-    if coords_array.ndim == 1:
-        coords_array = coords_array.reshape(1, -1)
-    
     # Scale from [0, 1000] to [0, 1] then denormalize to pixel coordinates
-    pixels = coords_array.copy()
-    pixels[:, 0] = (coords_array[:, 0] / 1000.0) * img_width
-    pixels[:, 1] = (coords_array[:, 1] / 1000.0) * img_height
-    
-    return pixels
-
-
-def _parse_pixel_from_json(
-    text: str,
-    img_width: Optional[int] = None,
-    img_height: Optional[int] = None,
-) -> Optional[List[float]]:
-    """Extract a single 2D pixel [x, y] from a JSON object in the text.
-
-    Accepts either {"x":..,"y":..} or {"u":..,"v":..}. Falls back to first two floats.
-    
-    Args:
-        text: Response text containing JSON coordinates
-        img_width: Image width in pixels (required for qwen3)
-        img_height: Image height in pixels (required for qwen3)
-    
-    Returns:
-        Pixel coordinates [x, y] in original image space
-    """
-    import json as _json
-
-    try:
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            candidate = text[first_brace : last_brace + 1]
-            obj = _json.loads(candidate)
-            if isinstance(obj, dict):
-                coords = None
-                if all(k in obj for k in ("x", "y")):
-                    coords = [float(obj["x"]), float(obj["y"])]
-                elif all(k in obj for k in ("u", "v")):
-                    coords = [float(obj["u"]), float(obj["v"])]
-                
-                if coords is not None:
-                    # For Qwen3, coordinates are in [0, 1000] and need to be scaled back
-                    if img_width is None or img_height is None:
-                        raise ValueError(
-                            "img_width and img_height required for qwen3 coordinate conversion"
-                        )
-                    coords_array = _qwen3_coords_to_pixels(
-                        np.array(coords), img_width, img_height
-                    )
-                    return coords_array.flatten().tolist()
-    except Exception:
-        pass
-
-    return None
-
-
-def graph_agent_predict_query_list(
-    queries_list,
-    *,
-    model,
-    processor,
-    node_feats_npz,
-    node_centers: np.ndarray,
-    node_centroids: np.ndarray,
-    node_extents: np.ndarray,
-    tools: Dict[str, Any],
-    timestep_idx: int,
-    frame_number: int,
-    train_cameras,
-    system_prompt: str,
-    prompt_template: str,
-    point_n2o: Callable[[np.ndarray], np.ndarray],
-    max_iterations: int = 10,
-    tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
-    graph_tools: Optional[Any] = None,
-    tool_viz_dir: Optional[Path] = None,
-    query_type: str = "objects",
-):
-    """Use prompt_graph_agent with tools to predict a 3D point per query.
-
-    Returns items with a single mock layer key "0" like static_graph baseline.
-    """
-    outputs = []
-
-    # Precompute projection for this frame
-    frame_name = f"frame_{int(frame_number):06d}.jpg"
-    proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
-        int(frame_number), train_cameras, frame_name
-    )
-
-    for query_idx, query in enumerate(queries_list):
-        substring = query["query"]
-        question = prompt_template.format(substring=substring)
-        
-        # Start recording if tool visualization is enabled
-        if tool_viz_dir is not None and graph_tools is not None:
-            # Sanitize query text for filename
-            sanitized_query = re.sub(r'[^\w\s-]', '', substring)  # Remove special chars
-            sanitized_query = re.sub(r'\s+', '_', sanitized_query)  # Replace whitespace with _
-            sanitized_query = sanitized_query[:50]  # Limit length
-            rrd_filename = f"t{timestep_idx:03d}_{query_type}_{query_idx:02d}_{sanitized_query}.rrd"
-            rrd_file = tool_viz_dir / rrd_filename
-            graph_tools.start_recording(str(rrd_file))
-
-        # Call Qwen agent with the graph at this specific timestep
-        agent_result = prompt_graph_agent(
-            question=question,
-            node_feats=node_feats_npz,
-            initial_timestep_idx=int(timestep_idx),
-            node_centers=node_centers,
-            node_centroids=node_centroids,
-            node_extents=node_extents,
-            model=model,
-            processor=processor,
-            tools=tools,
-            system_prompt=system_prompt,
-            max_iterations=max_iterations,
-            tool_call_limits=tool_call_limits,
-        )
-
-        response = agent_result["final_answer"]
-
-        point3d = _parse_point_from_json(response)
-        sanitized_tool_calls = sanitize_tool_calls(agent_result.get("tool_calls", []))
-        message_history = agent_result.get("message_history", [])
-        if point3d is None:
-            # Stop recording if tool visualization is enabled (failed prediction)
-            if tool_viz_dir is not None and graph_tools is not None:
-                graph_tools.stop_recording()
-            
-            # 3D failure: fall back to 2D corner pixel (0,0), omit 3D position to avoid skew
-            out_item = {
-                "query": substring,
-                "predictions": {},
-                "raw_response": response,
-                "tool_calls": sanitized_tool_calls,
-                "message_history": message_history,
-            }
-            out_item["predictions"]["0"] = {
-                "pixel_coords": [[0.0, 0.0]],
-                "positions": [],
-            }
-            outputs.append(out_item)
-            continue
-
-        # Project to pixel coords - convert normalized point back to original coords first
-        pos_arr = np.array(point3d, dtype=np.float32).reshape(1, 3)
-        pos_arr_original = point_n2o(pos_arr)
-        
-        # Log final prediction to rerun before stopping recording
-        if tool_viz_dir is not None and graph_tools is not None:
-            graph_tools.log_final_prediction(
-                position=pos_arr_original,
-                timestep_idx=timestep_idx,
-                label=substring,
-            )
-            graph_tools.stop_recording()
-        pixels = project_3d_to_2d(pos_arr_original, proj_matrix, img_width, img_height)
-
-        out_item = {
-            "query": substring,
-            "predictions": {},
-            "raw_response": response,
-            "tool_calls": sanitized_tool_calls,
-            "message_history": message_history,
-        }
-        # Single mock layer key for graph agent baseline
-        out_item["predictions"]["0"] = {
-            "pixel_coords": pixels.tolist(),
-            "positions": pos_arr.tolist(),
-        }
-        outputs.append(out_item)
-
-    return outputs
+    px = (x / 1000.0) * img_width
+    py = (y / 1000.0) * img_height
+    return px, py
 
 
 def graph_agent_feat_queries(
-    *,
     model,
     processor,
     graph_dir: Path | str,
@@ -408,11 +180,9 @@ def graph_agent_feat_queries(
     adjacency = np.load(adjacency_path)
     bhattacharyya_coeffs = np.load(bhattacharyya_path)
 
-    # Compute coordinate transformations (GraphTools will handle normalization internally)
-    point_o2n, point_n2o, _, distance_o2n = get_coord_transformations(positions)
-    node_centers_norm = point_o2n(node_centers)
-    node_centroids_norm = point_o2n(node_centroids)
-    node_extents_norm = distance_o2n(node_extents)
+    # Keep agent context/tool responses in the same normalized space; convert
+    # final model prediction back to original space right before projection/logging.
+    point_o2n, point_n2o, distance_o2n, _ = get_coord_transformations(positions)
 
     # Load autoencoder for inspect_highres_node_at_time tool
     if cfg.eval.spatial.graph_agent_use_global_autoencoder:
@@ -477,56 +247,80 @@ def graph_agent_feat_queries(
     prompt_template = cfg.eval.spatial.graph_agent_prompt_template
     max_iterations = cfg.eval.spatial.graph_agent_max_iterations
 
-    results: Dict[str, Any] = {}
-    for timestep, timestep_queries in clip_gt.items():
-        t = int(timestep)
-        frame_number = int(timestep_queries["frame_number"])  # local idx
+    results = []
+    for annotation in clip_gt:
+        # prompt and other data
+        query_id = annotation["id"]
+        timestep = annotation["timestep"]
+        frame_number = timestep * cfg.eval.annotation_stride
+        frame_name = f"frame_{frame_number:06d}.png"
+        proj_matrix, img_width, img_height = get_proj_matrix_from_timestep(
+            int(frame_number), train_cameras, frame_name
+        )
+        question = annotation["query"]
+        prompt = prompt_template.format(question=question)
+        
+        # start recording tool calls
+        if tool_viz_dir is not None and graph_tools is not None:
+            sanitized_query = re.sub(r'[^\w\s-]', '', question)  # Remove special chars
+            sanitized_query = re.sub(r'\s+', '_', sanitized_query)  # Replace whitespace with _
+            sanitized_query = sanitized_query[:50]  # Limit length
+            rrd_filename = f"t{timestep:03d}_{query_id}_{sanitized_query}.rrd"
+            rrd_file = tool_viz_dir / rrd_filename
+            graph_tools.start_recording(str(rrd_file))
 
-        results[timestep] = {"objects": [], "actions": []}
-
-        results[timestep]["objects"] = graph_agent_predict_query_list(
-            timestep_queries.get("objects", []),
+        # llm answer
+        agent_result = prompt_graph_agent(
+            question=prompt,
+            node_feats=node_feats_npz,
+            initial_timestep_idx=timestep,
+            node_centers=point_n2o(node_centers),
+            node_centroids=point_n2o(node_centroids),
+            node_extents=distance_o2n(node_extents),
             model=model,
             processor=processor,
-            node_feats_npz=node_feats_npz,
-            node_centers=node_centers_norm,
-            node_centroids=node_centroids_norm,
-            node_extents=node_extents_norm,
             tools=tools,
-            timestep_idx=t,
-            frame_number=frame_number,
-            train_cameras=train_cameras,
             system_prompt=system_prompt,
-            prompt_template=prompt_template,
-            point_n2o=point_n2o,
             max_iterations=max_iterations,
             tool_call_limits=tool_call_limits,
-            graph_tools=graph_tools,
-            tool_viz_dir=tool_viz_dir,
-            query_type="objects",
         )
 
-        results[timestep]["actions"] = graph_agent_predict_query_list(
-            timestep_queries.get("actions", []),
-            model=model,
-            processor=processor,
-            node_feats_npz=node_feats_npz,
-            node_centers=node_centers_norm,
-            node_centroids=node_centroids_norm,
-            node_extents=node_extents_norm,
-            tools=tools,
-            timestep_idx=t,
-            frame_number=frame_number,
-            train_cameras=train_cameras,
-            system_prompt=system_prompt,
-            prompt_template=prompt_template,
-            point_n2o=point_n2o,
-            max_iterations=max_iterations,
-            tool_call_limits=tool_call_limits,
-            graph_tools=graph_tools,
-            tool_viz_dir=tool_viz_dir,
-            query_type="actions",
-        )
+        # parse and convert to pixels
+        json_data = parse_json(agent_result["final_answer"])
+        if json_data is None or "x" not in json_data or "y" not in json_data or "z" not in json_data:
+            px, py = None, None
+            pos_arr_original = None
+            if tool_viz_dir is not None and graph_tools is not None:
+                graph_tools.stop_recording()
+        else:
+            # grab point in original coordinates
+            x, y, z = json_data["x"], json_data["y"], json_data["z"]
+            pos_arr = np.array([x, y, z], dtype=np.float32).reshape(1, 3)
+            pos_arr_original = point_n2o(pos_arr)
+
+            # log final prediction to rerun
+            if tool_viz_dir is not None and graph_tools is not None:
+                graph_tools.log_final_prediction(
+                    position=pos_arr_original,
+                    timestep_idx=timestep,
+                    label=question,
+                )
+                graph_tools.stop_recording()
+
+            # project to pixels
+            pixels = project_3d_to_2d(pos_arr_original, proj_matrix, img_width, img_height)
+            px, py = float(pixels[0, 0]), float(pixels[0, 1])
+
+        results.append({
+            "id": query_id,
+            "timestep": timestep,
+            "query": question,
+            "predicted": [px, py],
+            "predicted_3d_original": pos_arr_original.tolist() if pos_arr_original is not None else [None, None, None],
+            "raw_response": agent_result["final_answer"],
+            "message_history": agent_result["message_history"],
+            "tool_calls": sanitize_tool_calls(agent_result.get("tool_calls", [])),
+        })
 
         # Clear VRAM after each timestep to prevent OOM
         gc.collect()
@@ -542,46 +336,7 @@ def graph_agent_feat_queries(
     return results
 
 
-def frame_direct_predict_query_list(
-    queries_list,
-    *,
-    model,
-    processor,
-    image: Image.Image,
-    prompt_template: str,
-    system_prompt: str,
-):
-    outputs = []
-    for query in queries_list:
-        substring = query["query"]
-        question = prompt_template.format(substring=substring)
-
-        response = ask_qwen_about_image(
-            image=image,
-            prompt=question,
-            model=model,
-            processor=processor,
-            system_prompt=system_prompt,
-        )
-
-        px = _parse_pixel_from_json(
-            response,
-            img_width=image.width,
-            img_height=image.height,
-        )
-        if px is None:
-            px = [0.0, 0.0]
-
-        out_item = {"query": substring, "predictions": {}, "raw_response": response}
-        out_item["predictions"]["0"] = {
-            "pixel_coords": [px],
-        }
-        outputs.append(out_item)
-    return outputs
-
-
 def frame_direct_feat_queries(
-    *,
     model,
     processor,
     preprocessed_root: Path | str,
@@ -591,38 +346,50 @@ def frame_direct_feat_queries(
     cfg: DictConfig,
 ):
     """Run direct Qwen prompting on the frame to return a single pixel per query."""
-    results: Dict[str, Any] = {}
     images_dir = Path(preprocessed_root) / clip.name / images_subdir
 
-    prompt_template = cfg.eval.spatial.frame_direct_prompt_template
     system_prompt = cfg.eval.spatial.frame_direct_system_prompt
+    prompt_template = cfg.eval.spatial.frame_direct_prompt_template
 
-    for timestep, timestep_queries in clip_gt.items():
-        frame_number = int(timestep_queries["frame_number"])  # local idx
-        frame_path = find_image_path(images_dir, frame_number)
-        if frame_path is None:
-            continue
+    results = []
+    for annotation in clip_gt:
+        # prompt
+        timestep = annotation["timestep"]
+        frame_number = timestep * cfg.eval.annotation_stride
+        frame_path = images_dir / f"frame_{frame_number:06d}.png"
         image = Image.open(frame_path).convert("RGB")
+        prompt = prompt_template.format(question=annotation["query"])
 
-        results[timestep] = {"objects": [], "actions": []}
-
-        results[timestep]["objects"] = frame_direct_predict_query_list(
-            timestep_queries.get("objects", []),
+        # llm answer
+        response = ask_qwen_about_image(
+            image=image,
+            prompt=prompt,
             model=model,
             processor=processor,
-            image=image,
-            prompt_template=prompt_template,
             system_prompt=system_prompt,
         )
 
-        results[timestep]["actions"] = frame_direct_predict_query_list(
-            timestep_queries.get("actions", []),
-            model=model,
-            processor=processor,
-            image=image,
-            prompt_template=prompt_template,
-            system_prompt=system_prompt,
-        )
+        # parse and convert to pixels
+        json_data = parse_json(response)
+        if json_data is None:
+            px, py = None, None
+            x, y = None, None
+        else:
+            x = float(json_data["x"])
+            y = float(json_data["y"])
+            px, py = qwen3_coords_to_pixels(x, y, image.width, image.height)
+            px, py = float(px), float(py)
+
+        results.append({
+            "id": annotation["id"],
+            "timestep": timestep,
+            "query": annotation["query"],
+            "predicted": [px, py],
+            "predicted_qwen3coords": [x, y],
+            "raw_response": response,
+            "message_history": [],
+            "tool_calls": [],
+        })
 
         # Clear VRAM after each timestep to prevent OOM
         gc.collect()
@@ -633,12 +400,11 @@ def frame_direct_feat_queries(
 
 
 def dump_spatial_prediction_visualizations(
-    *,
+    cfg,
     results_splat: Dict[str, Any],
     clip_name: str,
     preprocessed_root: Path | str,
     images_subdir: str,
-    gt_data: Dict[str, Any],
     viz_dir: Path | str,
     method_name: str | None = None,
 ) -> None:
@@ -709,33 +475,20 @@ def dump_spatial_prediction_visualizations(
 
     images_dir = Path(preprocessed_root) / clip_name / images_subdir
 
-    for timestep, group_preds in results_splat.items():
-        timestep_str = str(timestep)
-        if timestep_str not in gt_data:
-            continue
-        frame_number = int(gt_data[timestep_str]["frame_number"])  # type: ignore[index]
-        # Use frame_number directly from GT (assumed local zero-based index)
-        frame_path = find_image_path(images_dir, frame_number)
-        if frame_path is None:
-            continue
+    for result in results_splat:
+        timestep = result["timestep"]
+        frame_number = timestep * cfg.eval.annotation_stride
+        frame_path = images_dir / f"frame_{frame_number:06d}.png"
         base_img = cv2.imread(str(frame_path))
-        if base_img is None:
-            continue
 
-        # Draw for objects and actions separately
-        for group_name, color in (("objects", (255, 0, 0)), ("actions", (0, 0, 255))):
-            items = group_preds.get(group_name, [])
-            for item in items:
-                query = item.get("query", group_name)
-                preds_by_layer = item.get("predictions", {})
-                for layer_key, pred in preds_by_layer.items():
-                    layer_str = str(layer_key)
-                    coords = pred.get("pixel_coords", [])
-                    if not coords:
-                        continue
-                    img = base_img.copy()
-                    img = _draw_points(
-                        img, coords, color_bgr=color, radius=5, draw_indices=True
-                    )
-                    out_name = f"{frame_number:06d}_L{layer_str}_{group_name}_{_sanitize_filename(query)}.jpg"
-                    cv2.imwrite(str(viz_root / out_name), img)
+        # draw point
+        coords = result["predicted"]
+        if coords is not None and isinstance(coords, list) and len(coords) == 2:
+            # Expect a single point [x, y]; wrap it for _draw_points which expects list of points
+            if all(isinstance(c, (int, float)) and c is not None for c in coords):
+                img = base_img.copy()
+                img = _draw_points(
+                    img, [coords], color_bgr=(255, 0, 0), radius=5, draw_indices=True
+                )
+                out_name = f"{frame_number:06d}_{result['id']}_{_sanitize_filename(result['query'])}.png"
+                cv2.imwrite(str(viz_root / out_name), img)

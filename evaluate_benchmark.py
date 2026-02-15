@@ -137,16 +137,10 @@ def evaluate_spatial(
     # load gt data
     gt_file = Path(cfg.preprocessed_root) / clip.name / cfg.eval.spatial.gt_filename
     with gt_file.open("r") as f:
-        gt_data = json.load(f)
+        gt_data = json.load(f)["annotations"]
 
     # compute predictions
     all_results = {}
-
-    def _clear_vram():
-        """Clear VRAM cache after each method to prevent OOM."""
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     if "frame_direct" in methods_to_run:
         # Direct Qwen prompting on frame to return a pixel
@@ -159,7 +153,6 @@ def evaluate_spatial(
             clip=clip,
             cfg=cfg,
         )
-        _clear_vram()
 
     if "graph_agent" in methods_to_run:
         # Graph agent with tools (requires qwen3)
@@ -171,7 +164,6 @@ def evaluate_spatial(
             clip=clip,
             cfg=cfg,
         )
-        _clear_vram()
     out_dir = Path(cfg.eval.spatial.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions_file = out_dir / f"{clip.name}.json"
@@ -187,11 +179,11 @@ def evaluate_spatial(
         for method_key, viz_name in viz_method_names.items():
             if method_key in all_results:
                 dump_spatial_prediction_visualizations(
+                    cfg=cfg,
                     results_splat=all_results[method_key],
                     clip_name=clip.name,
                     preprocessed_root=Path(cfg.preprocessed_root),
                     images_subdir=cfg.eval.paths.images_subdir,
-                    gt_data=gt_data,
                     viz_dir=Path(cfg.eval.spatial.visualizations_dir),
                     method_name=viz_name,
                 )
@@ -212,13 +204,8 @@ def main(cfg: DictConfig):
     )
 
     for clip in tqdm(cfg.clips, desc="Evaluating clips", unit="clip"):
-        evaluate_temporal(clip, cfg, model=model, processor=processor)
-        evaluate_spatial(
-            clip=clip,
-            cfg=cfg,
-            model=model,
-            processor=processor,
-        )
+        evaluate_temporal(clip=clip, cfg=cfg, model=model, processor=processor)
+        evaluate_spatial( clip=clip, cfg=cfg, model=model, processor=processor)
 
 if __name__ == "__main__":
     main()

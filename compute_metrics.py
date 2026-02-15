@@ -9,221 +9,130 @@ import json
 def compute_spatial_metrics(cfg: DictConfig):
     if cfg.compute_metrics.spatial is None:
         return
+    
     cm_cfg = cfg.compute_metrics.spatial
-
     gt_filename: str = cm_cfg.gt_filename
     pred_root = Path(cm_cfg.pred_root)
     out_dir = Path(cm_cfg.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     aggregated_file = Path(cm_cfg.aggregated_output_filename)
     aggregated_file.parent.mkdir(parents=True, exist_ok=True)
-
-    ks: list[int] = list(cm_cfg.l2_top_ks)
-    layers_filter = {str(layer_idx) for layer_idx in cm_cfg.layers}
-
-    methods: list[str] = list(cm_cfg.methods)
-
-    # Dataset-wide accumulators (layerwise):
-    # methods -> class -> layer_key -> {sum: np.array[K], count: int}
-    dataset_stats: dict[str, dict[str, dict[str, dict[str, np.ndarray | int]]]] = {
-        m: {"objects": {}, "actions": {}, "all": {}} for m in methods
-    }
-
-    def _min_l2_at_k(pred_coords: np.ndarray, gt_xy: np.ndarray) -> np.ndarray:
-        # pred_coords: [N, 2] (x, y); gt_xy: [2]
-        if pred_coords.size == 0:
-            return np.full(len(ks), np.inf, dtype=np.float64)
-        diffs = pred_coords.astype(np.float64) - gt_xy[None, :]
-        dists = np.sqrt((diffs[:, 0] ** 2) + (diffs[:, 1] ** 2))  # [N]
-        out = np.empty(len(ks), dtype=np.float64)
-        for i, k in enumerate(ks):
-            kk = min(k, dists.shape[0])
-            if kk <= 0:
-                out[i] = np.inf
-            else:
-                out[i] = float(np.min(dists[:kk]))
-        return out
-
+    
+    # Dataset-wide accumulators per method (query-wise for micro average)
+    method_all_distances: dict[str, list[float]] = {}
+    
+    # Per-clip results
     for clip in cfg.clips:
         clip_name = str(clip.name)
         gt_path = Path(cfg.preprocessed_root) / clip_name / gt_filename
         pred_path = pred_root / f"{clip_name}.json"
-
+        
         if not gt_path.exists() or not pred_path.exists():
             continue
-
+        
         with gt_path.open("r") as f:
             gt_data = json.load(f)
         with pred_path.open("r") as f:
-            preds_all = json.load(f)
-
-        per_clip_results = {}
-
-        for method in methods:
-            if method not in preds_all:
-                continue
-
-            # Per-class, per-layer accumulators for this clip
-            sums: dict[str, dict[str, np.ndarray]] = {
-                "objects": {},
-                "actions": {},
-                "all": {},
-            }
-            counts: dict[str, dict[str, int]] = {"objects": {}, "actions": {}, "all": {}}
-            clip_method_items: list[dict] = []
-
-            method_preds = preds_all[method]
-
-            # Iterate timesteps present in both GT and predictions
-            for t_key, gt_entry in gt_data.items():
-                if t_key not in method_preds:
+            preds_data = json.load(f)
+        
+        annotations = gt_data.get("annotations", [])
+        methods_preds = preds_data
+        
+        clip_results: dict[str, dict] = {}
+        
+        # Process each method
+        for method_name, method_preds in methods_preds.items():
+            # Initialize method accumulators if not exists
+            if method_name not in method_all_distances:
+                method_all_distances[method_name] = []
+            
+            method_distances: list[float] = []
+            query_results: list[dict] = []
+            
+            # Create a mapping from query_id to predictions
+            pred_by_query_id: dict[str, dict] = {}
+            for pred_item in method_preds:
+                query_id = pred_item.get("id")
+                if query_id:
+                    pred_by_query_id[query_id] = pred_item
+            
+            # Process each annotation
+            for annotation in annotations:
+                query_id = str(annotation.get("id"))
+                question = str(annotation.get("query"))
+                timestep = int(annotation.get("timestep"))
+                
+                # Ground-truth pixel point (x, y)
+                pil_coords = annotation.get("pil_coords", [])
+                if len(pil_coords) != 2:
                     continue
-                pred_entry = method_preds[t_key]
-
-                for group in ("objects", "actions"):
-                    gt_list = gt_entry.get(group, [])
-                    pred_list = pred_entry.get(group, [])
-                    n = min(len(gt_list), len(pred_list))
-                    if n <= 0:
-                        continue
-
-                    for i in range(n):
-                        gt_item = gt_list[i]
-                        pred_item = pred_list[i]
-
-                        # Ground-truth pixel point (x, y)
-                        gx = float(gt_item["pixel_x"])  # assume set in config pipeline
-                        gy = float(gt_item["pixel_y"])  # assume set in config pipeline
-                        gt_xy = np.array([gx, gy], dtype=np.float64)
-
-                        # Collect per-layer min_l2@k for this query
-                        preds_by_layer = pred_item.get("predictions", {})
-                        per_layer_out: dict[str, dict[str, float]] = {}
-                        for layer_key, layer_pred in preds_by_layer.items():
-                            lkey = str(layer_key)
-                            if lkey not in layers_filter:
-                                continue
-                            coords = np.array(layer_pred.get("pixel_coords", []), dtype=np.float64)
-                            vals = _min_l2_at_k(coords, gt_xy)
-                            vals = np.round(vals, 2)
-                            per_layer_out[lkey] = {f"min_l2@{k}": float(v) for k, v in zip(ks, vals.tolist())}
-                            # accumulate per group/layer
-                            if lkey not in sums[group]:
-                                sums[group][lkey] = np.zeros(len(ks), dtype=np.float64)
-                                counts[group][lkey] = 0
-                            sums[group][lkey] += vals
-                            counts[group][lkey] += 1
-                            # overall
-                            if lkey not in sums["all"]:
-                                sums["all"][lkey] = np.zeros(len(ks), dtype=np.float64)
-                                counts["all"][lkey] = 0
-                            sums["all"][lkey] += vals
-                            counts["all"][lkey] += 1
-
-                        # record per-query item if we computed any layer metrics
-                        if per_layer_out:
-                            query_text = pred_item.get("query") or gt_item.get("query")
-                            clip_method_items.append(
-                                {
-                                    "timestep": t_key,
-                                    "frame_number": int(gt_entry.get("frame_number", -1)),
-                                    "group": group,
-                                    "query": query_text,
-                                    "per_layer": per_layer_out,
-                                }
-                            )
-
-            # Compute averages for this clip and method
-            method_out = {"per_class": {}, "counts": {}, "items": clip_method_items}
-            for group in ("objects", "actions", "all"):
-                per_layer_avgs = {}
-                per_layer_counts = {}
-                for lkey, svec in sums[group].items():
-                    c = counts[group].get(lkey, 0)
-                    if c > 0:
-                        avg_arr = svec / c
-                        avg_list = np.round(avg_arr, 2).tolist()
+                gx = float(pil_coords[0])
+                gy = float(pil_coords[1])
+                gt_xy = np.array([gx, gy], dtype=np.float64)
+                
+                pred_item = pred_by_query_id.get(query_id)
+                
+                if pred_item and "predicted" in pred_item and pred_item["predicted"] is not None:
+                    pred_coords = pred_item["predicted"]
+                    if isinstance(pred_coords, list) and len(pred_coords) == 2:
+                        px = float(pred_coords[0])
+                        py = float(pred_coords[1])
+                        pred_xy = np.array([px, py], dtype=np.float64)
+                        
+                        # Compute L2 distance
+                        diff = pred_xy - gt_xy
+                        l2_distance = float(np.sqrt(diff[0] ** 2 + diff[1] ** 2))
                     else:
-                        avg_list = [float("nan")] * len(ks)
-                    per_layer_avgs[lkey] = {f"min_l2@{k}": v for k, v in zip(ks, avg_list)}
-                    per_layer_counts[lkey] = c
-
-                    # Update dataset-wide accumulators
-                    if lkey not in dataset_stats[method][group]:
-                        dataset_stats[method][group][lkey] = {
-                            "sum": np.zeros(len(ks), dtype=np.float64),
-                            "count": 0,
-                        }
-                    dataset_stats[method][group][lkey]["sum"] += svec
-                    dataset_stats[method][group][lkey]["count"] += c
-
-                method_out["per_class"][group] = per_layer_avgs
-                method_out["counts"][group] = per_layer_counts
-
-            per_clip_results[method] = method_out
-
-        # Save per-clip file with query-wise metrics
-        clip_out = {
-            "clip": clip_name,
-            "methods": per_clip_results,
-        }
-        with (out_dir / f"{clip_name}.json").open("w") as f:
-            json.dump(clip_out, f, indent=2)
-
-    # Save dataset-wide summary
-    summary = {"methods": {}}
-    for method in methods:
-        if method not in dataset_stats:
-            continue
-        mstats = dataset_stats[method]
-        out_m = {"per_class": {}, "counts": {}}
-        for group in ("objects", "actions", "all"):
-            per_layer = {}
-            per_layer_counts = {}
-            for lkey, stat in mstats[group].items():
-                total_count = int(stat["count"])  # type: ignore[index]
-                sums_arr = stat["sum"]  # type: ignore[index]
-                if total_count > 0:
-                    avg_arr = sums_arr / total_count  # type: ignore[operator]
-                    avg_list = np.round(avg_arr, 2).tolist()
+                        # Invalid prediction format
+                        l2_distance = float("inf")
+                        px, py = None, None
                 else:
-                    avg_list = [float("nan")] * len(ks)
-                per_layer[lkey] = {f"min_l2@{k}": v for k, v in zip(ks, avg_list)}
-                per_layer_counts[lkey] = total_count
-            out_m["per_class"][group] = per_layer
-            out_m["counts"][group] = per_layer_counts
-        summary["methods"][method] = out_m
-
-    # Create overview: best @1 score for each method in "all" category
-    overview = {}
-    for method in methods:
-        if method not in dataset_stats:
-            continue
-        mstats = dataset_stats[method]
-        all_group = mstats.get("all", {})
-        
-        best_layer = None
-        best_score = float("inf")
-        
-        for lkey, stat in all_group.items():
-            total_count = int(stat["count"])  # type: ignore[index]
-            sums_arr = stat["sum"]  # type: ignore[index]
-            if total_count > 0:
-                avg_arr = sums_arr / total_count  # type: ignore[operator]
-                # Get the @1 score (first element in ks)
-                score_at_1 = float(avg_arr[0])
-                if score_at_1 < best_score:
-                    best_score = score_at_1
-                    best_layer = lkey
-        
-        if best_layer is not None:
-            overview[method] = {
-                "best_min_l2@1": round(best_score, 2),
-                "best_layer": best_layer
+                    # No prediction or parsing failed
+                    l2_distance = float("inf")
+                    px, py = None, None
+                
+                method_distances.append(l2_distance)
+                method_all_distances[method_name].append(l2_distance)
+                
+                query_results.append({
+                    "id": query_id,
+                    "timestep": timestep,
+                    "query": question,
+                    "ground_truth_pixel": [gx, gy],
+                    "predicted_pixel": [px, py] if px is not None and py is not None else None,
+                    "l2_distance": round(l2_distance, 2) if l2_distance != float("inf") else None,
+                })
+            
+            # Compute per-method averages for this clip
+            valid_distances = [d for d in method_distances if d != float("inf")]
+            clip_results[method_name] = {
+                "queries": query_results,
+                "num_queries": len(query_results),
+                "mean_l2_distance": round(float(np.mean(valid_distances)), 2) if valid_distances else None,
+                "std_l2_distance": round(float(np.std(valid_distances)), 2) if valid_distances else None,
             }
-
+        
+        # Save per-clip results
+        with (out_dir / f"{clip_name}.json").open("w") as f:
+            json.dump({
+                "clip": clip_name,
+                "methods": clip_results,
+            }, f, indent=2)
+    
+    # Compute aggregated metrics per method (micro average over all queries)
+    aggregated: dict[str, dict] = {}
+    for method_name in method_all_distances.keys():
+        distances_list = method_all_distances[method_name]
+        valid_distances = [d for d in distances_list if d != float("inf")]
+        
+        aggregated[method_name] = {
+            "num_queries": len(distances_list),
+            "mean_l2_distance": round(float(np.mean(valid_distances)), 2) if valid_distances else None,
+            "std_l2_distance": round(float(np.std(valid_distances)), 2) if valid_distances else None,
+        }
+    
     with aggregated_file.open("w") as f:
-        json.dump({"overview": overview, "summary": summary}, f, indent=2)
+        json.dump({"methods": aggregated}, f, indent=2)
 
 def compute_temporal_metrics(cfg: DictConfig):
     if cfg.compute_metrics.temporal is None:
@@ -315,7 +224,7 @@ def compute_temporal_metrics(cfg: DictConfig):
                     
                     if pred_item and pred_item.get("predicted"):
                         pred_ranges = pred_item["predicted"]
-                        iou = compute_temporal_iou(gt_ranges, pred_ranges, cm_cfg.n_timesteps)
+                        iou = compute_temporal_iou(gt_ranges, pred_ranges, cfg.compute_metrics.n_timesteps)
                     else:
                         # No prediction or parsing failed
                         iou = 0.0
