@@ -1,7 +1,11 @@
 defaults:
   - temporal: default
-  - spatial: default
+  # - spatial: default
   - _self_
 
+spatial: null
+
+annotations_root: data/annotations
+
 # Required output directory for benchmark results
-output_dir: ${output_root}/metrics
+output_dir: ${output_root}/metrics_tmp # ! tmp

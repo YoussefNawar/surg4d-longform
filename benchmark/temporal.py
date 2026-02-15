@@ -25,6 +25,7 @@ from llm.qwen_utils import (
 from llm.tools import GraphTools
 from autoencoder.model_qwen import QwenAutoencoder
 from benchmark.serialization_utils import sanitize_tool_calls
+from benchmark.serialization_utils import parse_json
 
 
 def load_video_frames(video_dir: Path, images_subdir: str) -> "Tuple[List[Path], int]":
@@ -61,6 +62,8 @@ def seconds_to_timestep(seconds: float, num_timesteps: int, fps: float) -> int:
     Returns:
         Nearest timestep (integer frame index)
     """
+    if seconds is None:
+        return None
     # Convert seconds to frame index and round to nearest integer
     frame_idx = int(round(seconds * fps))
     # Clamp to valid range
@@ -103,33 +106,6 @@ def get_num_timesteps_from_graph(graph_path: Path) -> int:
     """
     graph_data = load_graph_data(graph_path)
     return int(graph_data['adjacency_matrices'].shape[0])
-
-
-def build_prompt(
-    template: str,
-    question: str,
-    answer_format: str,
-    num_frames: int,
-    last_frame: int
-) -> str:
-    """Fill in prompt template with query-specific info.
-    
-    Args:
-        template: Prompt template string with placeholders
-        question: The question to answer
-        answer_format: Expected answer format
-        num_frames: Number of frames/timesteps
-        last_frame: Last frame index (num_frames - 1)
-        
-    Returns:
-        Formatted prompt string
-    """
-    return template.format(
-        num_frames=num_frames,
-        last_frame=last_frame,
-        question=question,
-        answer_format=answer_format,
-    )
 
 
 def parse_single_frame(response: str, query_type: str) -> Optional[Dict]:
@@ -318,35 +294,22 @@ def multiframe_queries(
     # Original video is at video_fps, but we sample every stride frames
     # For 20 graph timesteps from 25 fps video: effective_fps = 25 / 4 = 6.25
     effective_fps = cfg.eval.video_fps / stride
-    
-    parser_map = {
-        'action_onset': parse_single_frame,
-        'action_offset': parse_single_frame,
-        'action_duration': parse_frame_ranges,
-        'multiple_event_ordering': parse_ordered_events,
-        'count_frequency': parse_count_and_ranges
-    }
-    
+
     results = []
     for query_anno in annotations:
-        query_type = query_anno['query_type']
-        
-        # Get system prompt and template using new flat structure
-        system_prompt_key = f"multiframe_{query_type}_system_prompt"
-        template_key = f"multiframe_{query_type}_prompt_template"
-        
-        system_prompt = cfg.eval.temporal[system_prompt_key]
-        template = cfg.eval.temporal[template_key]
-        
-        # Build prompt
-        prompt = build_prompt(
-            template=template,
-            question=query_anno['question'],
-            answer_format=query_anno['answer_format'],
-            num_frames=len(selected_frames),
-            last_frame=len(selected_frames) - 1,
-        )
-        
+        query_type = query_anno['type']
+
+        # prompt
+        system_prompt = cfg.eval.temporal.multiframe_system_prompt
+        if query_type == 'pit':
+            template = cfg.eval.temporal.multiframe_pit_prompt_template
+        elif query_type == 'range':
+            template = cfg.eval.temporal.multiframe_action_duration_prompt_template
+        else:
+            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+        prompt = template.format(question=query_anno['query'])
+
+        # llm answer
         response = prompt_with_video_frames(
             question=prompt,
             image_paths=selected_frames,
@@ -356,22 +319,23 @@ def multiframe_queries(
             fps=effective_fps,
         )
         
-        # Parse response
-        predicted = parser_map[query_type](response, query_type)
-        
-        # Convert seconds to timesteps if using Qwen3 format
-        if predicted and 'second' in predicted:
-            # Convert single second to timestep
-            predicted['timestep'] = seconds_to_timestep(predicted['second'], num_ts, effective_fps)
-        elif predicted and 'second_ranges' in predicted:
-            # Convert second ranges to timestep ranges
-            timestep_ranges = []
-            for start_sec, end_sec in predicted['second_ranges']:
-                start_timestep = seconds_to_timestep(start_sec, num_ts, effective_fps)
-                end_timestep = seconds_to_timestep(end_sec, num_ts, effective_fps)
-                timestep_ranges.append([start_timestep, end_timestep])
-            predicted['ranges'] = timestep_ranges
-        
+        # parse answer and convert to timestep
+        json_data = parse_json(response)
+        if query_type == 'pit':
+            second = json_data.get("second", None)
+            prediction = seconds_to_timestep(second, num_ts, effective_fps)
+        elif query_type == 'range':
+            second_ranges = json_data.get("second_ranges", None)
+            prediction = []
+            if second_ranges is not None:
+                for second_range in second_ranges:
+                    if not isinstance(second_range, list) or len(second_range) != 2:
+                        prediction = None
+                        continue
+                    prediction.append([seconds_to_timestep(second_range[0], num_ts, effective_fps), seconds_to_timestep(second_range[1], num_ts, effective_fps)])
+        else:
+            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+
         # Build message history for consistency with graph_agent
         # (multiframe doesn't support tools, so this is just the initial query and response)
         message_history = [
@@ -381,12 +345,13 @@ def multiframe_queries(
         ]
         
         results.append({
-            'query_id': query_anno['query_id'],
-            'query_type': query_type,
-            'question': query_anno['question'],
-            'predicted': predicted,
+            'id': query_anno['id'],
+            'type': query_type,
+            'query': query_anno['query'],
+            'predicted': prediction,
             'raw_response': response,
             'message_history': message_history,
+            'tool_calls': [],
         })
         
         # Clear memory after each query to prevent OOM with video inputs
@@ -443,10 +408,7 @@ def graph_agent_queries(
     patch_latents_through_time = np.load(patch_latents_path)
     adjacency = np.load(adjacency_path)
     bhattacharyya_coeffs = np.load(bhattacharyya_path)
-    
-    # Get number of timesteps
-    num_ts = adjacency.shape[0]
-    
+
     # Load autoencoder for highres inspection tools (following spatial pattern)
     if cfg.eval.temporal.graph_agent_use_global_autoencoder:
         autoencoder_path = Path(cfg.preprocessed_root) / cfg.eval.temporal.graph_agent_global_autoencoder_checkpoint_dir / "best_ckpt.pth"
@@ -501,47 +463,34 @@ def graph_agent_queries(
     # Convert to None if no limits specified
     if len(tool_call_limits) == 0:
         tool_call_limits = None
-    
-    # Parser map for response formats
-    parser_map = {
-        'action_onset': parse_single_frame,
-        'action_offset': parse_single_frame,
-        'action_duration': parse_frame_ranges,
-        'multiple_event_ordering': parse_ordered_events,
-        'count_frequency': parse_count_and_ranges
-    }
-    
+
     # Process each query
     results = []
     for query_anno in annotations:
-        query_type = query_anno['query_type']
-        query_id = query_anno['query_id']
-        question_text = query_anno['question']
+        query_type = query_anno['type']
+        query_id = query_anno['id']
+        query = query_anno['query']
         
         # Start recording if tool visualization is enabled
         if tool_viz_enabled:
             # Sanitize question text for filename
-            sanitized_question = re.sub(r'[^\w\s-]', '', question_text)  # Remove special chars
+            sanitized_question = re.sub(r'[^\w\s-]', '', query)  # Remove special chars
             sanitized_question = re.sub(r'\s+', '_', sanitized_question)  # Replace whitespace with _
             sanitized_question = sanitized_question[:50]  # Limit length
             rrd_file = tool_viz_dir / f"{query_id}_{sanitized_question}.rrd"
             graph_tools.start_recording(str(rrd_file))
         
-        system_prompt_key = f"graph_agent_{query_type}_system_prompt"
-        template_key = f"graph_agent_{query_type}_prompt_template"
-        
-        system_prompt = cfg.eval.temporal[system_prompt_key]
-        template = cfg.eval.temporal[template_key]
-        
-        # Build prompt
-        prompt = build_prompt(
-            template=template,
-            question=query_anno['question'],
-            answer_format=query_anno['answer_format'],
-            num_frames=num_ts,
-            last_frame=num_ts - 1,
-        )
-        
+        # prompt
+        system_prompt = cfg.eval.temporal.graph_agent_system_prompt
+        if query_type == 'pit':
+            template = cfg.eval.temporal.graph_agent_pit_prompt_template
+        elif query_type == 'range':
+            template = cfg.eval.temporal.graph_agent_range_prompt_template
+        else:
+            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+        num_ts = graph_tools.adjacency.shape[0]
+        prompt = template.format(question=query, num_frames=num_ts, last_frame=num_ts - 1)
+
         # Query model with graph and tools
         # Use prompt_graph_agent which gives initial rough nodes at timestep 0
         # The agent then uses temporal tools to explore across time
@@ -565,27 +514,27 @@ def graph_agent_queries(
             graph_tools.stop_recording()
         
         # Extract response (agent_result is a dict when tools are used)
-        if isinstance(agent_result, dict):
-            response = agent_result.get("final_answer", str(agent_result))
-            tool_calls = sanitize_tool_calls(agent_result.get("tool_calls", []))
-            message_history = agent_result.get("message_history", [])
+        json_data = parse_json(agent_result["final_answer"])
+        if query_type == 'pit':
+            prediction = json_data.get("timestep", None)
+        elif query_type == 'range':
+            prediction = json_data.get("ranges", None)
+            if not isinstance(prediction, list):
+                prediction = None
+            for range in prediction:
+                if not isinstance(range, list) or len(range) != 2:
+                    prediction = None
         else:
-            response = agent_result
-            tool_calls = []
-            message_history = []
-        
-        # Parse response
-        # Graph agent now returns timesteps directly (not seconds), so no conversion needed
-        predicted = parser_map[query_type](response, query_type)
-        
+            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+
         results.append({
-            'query_id': query_anno['query_id'],
-            'query_type': query_type,
-            'question': query_anno['question'],
-            'predicted': predicted,
-            'raw_response': response,
-            'tool_calls': tool_calls,
-            'message_history': message_history,
+            'id': query_anno['id'],
+            'type': query_type,
+            'query': query_anno['query'],
+            'predicted': prediction,
+            'raw_response': agent_result["final_answer"],
+            'message_history': agent_result["message_history"],
+            'tool_calls': sanitize_tool_calls(agent_result.get("tool_calls", [])),
         })
         
         # Clear memory after each query to prevent OOM

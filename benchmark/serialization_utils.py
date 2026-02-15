@@ -1,5 +1,6 @@
 """Utilities for JSON serialization of benchmark results."""
 from typing import Any, Dict, List
+import json
 
 
 def sanitize_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -26,3 +27,14 @@ def sanitize_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]
         sanitized.append(clean_tc)
     return sanitized
 
+def parse_json(response: str) -> Dict[str, Any]:
+    try:
+        start = response.find('{')
+        end = response.rfind('}') + 1
+        if start >= 0 and end > start:
+            json_str = response[start:end]
+            data = json.loads(json_str)
+            return data
+        return None
+    except Exception:
+        return None

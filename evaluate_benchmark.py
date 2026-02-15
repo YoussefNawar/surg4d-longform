@@ -36,14 +36,10 @@ def evaluate_temporal(
     
     video_frames, _ = load_video_frames(video_dir, cfg.eval.paths.images_subdir)
     
-    # Load temporal annotations
-    temporal_labels_root = Path(cfg.eval.temporal.labels_root)
-    filename_template = cfg.eval.temporal.labels_filename_template
-    temporal_anno_file = temporal_labels_root / filename_template.format(clip_name=str(clip.name))
-    
+    # load annotations
+    temporal_anno_file = Path(cfg.eval.annotations_root) / "temporal" / f"{clip.name}.json"
     with open(temporal_anno_file) as f:
         temporal_data = json.load(f)
-    
     annotations = temporal_data["annotations"]
 
     # Map method names to strategy functions
@@ -80,13 +76,13 @@ def evaluate_temporal(
     for method_name, results in all_results.items():
         preds_by_method[method_name] = [
             {
-                "query_id": r.get("query_id"),
-                "query_type": r.get("query_type"),
-                "question": r.get("question"),
+                "id": r.get("id"),
+                "type": r.get("type"),
+                "query": r.get("query"),
                 "predicted": r.get("predicted"),
                 "raw_response": r.get("raw_response"),
-                "tool_calls": r.get("tool_calls"),
                 "message_history": r.get("message_history"),
+                "tool_calls": r.get("tool_calls"),
             }
             for r in results
         ]

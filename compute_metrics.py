@@ -5,10 +5,6 @@ import numpy as np
 import torch
 from pathlib import Path
 import json
-from typing import Dict, List
-from benchmark.cholect50_utils import CholecT50Loader
-from benchmark.benchmark_config import normalize_for_matching
-from sklearn.metrics import average_precision_score
 
 def compute_spatial_metrics(cfg: DictConfig):
     if cfg.compute_metrics.spatial is None:
@@ -234,10 +230,8 @@ def compute_temporal_metrics(cfg: DictConfig):
         return
     
     cm_cfg = cfg.compute_metrics.temporal
-    
     pred_root = Path(cm_cfg.pred_root)
-    labels_root = Path(cm_cfg.labels_root)
-    labels_filename_template = str(cm_cfg.labels_filename_template)
+
     out_dir = Path(cm_cfg.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     aggregated_file = Path(cm_cfg.aggregated_output_filename)
@@ -250,7 +244,7 @@ def compute_temporal_metrics(cfg: DictConfig):
     # Per-clip results
     for clip in cfg.clips:
         clip_name = str(clip.name)
-        labels_path = labels_root / labels_filename_template.format(clip_name=clip_name)
+        labels_path = Path(cfg.compute_metrics.annotations_root) / "temporal" / f"{clip_name}.json"
         pred_path = pred_root / f"{clip_name}.json"
         
         if not labels_path.exists() or not pred_path.exists():
@@ -260,11 +254,7 @@ def compute_temporal_metrics(cfg: DictConfig):
             labels_data = json.load(f)
         with pred_path.open("r") as f:
             preds_data = json.load(f)
-        
-        # Extract num_timesteps from ground truth clip info
-        clip_info = labels_data.get("clip_info", {})
-        num_timesteps = int(clip_info["num_frames"])
-        
+
         annotations = labels_data.get("annotations", [])
         methods_preds = preds_data.get("methods", {})
         
@@ -284,49 +274,48 @@ def compute_temporal_metrics(cfg: DictConfig):
             # Create a mapping from query_id to predictions
             pred_by_query_id: dict[str, dict] = {}
             for pred_item in method_preds:
-                query_id = pred_item.get("query_id")
+                query_id = pred_item.get("id")
                 if query_id:
                     pred_by_query_id[query_id] = pred_item
             
             # Process each annotation
             for annotation in annotations:
-                query_id = str(annotation.get("query_id"))
-                query_type = str(annotation.get("query_type"))
-                question = str(annotation.get("question"))
-                ground_truth = annotation.get("ground_truth", {})
+                query_id = str(annotation.get("id"))
+                query_type = str(annotation.get("type"))
+                question = str(annotation.get("query"))
                 
                 pred_item = pred_by_query_id.get(query_id)
                 
-                if query_type == "action_onset":
-                    # Ground truth uses "frame" key (ground truth annotations use this terminology)
-                    gt_timestep = int(ground_truth["frame"])
+                if query_type == "pit":
+                    gt_timestep = int(annotation["timesstep"])
                     
-                    if pred_item and pred_item.get("predicted"):
-                        pred_timestep = int(pred_item["predicted"]["timestep"])
-                        error = abs(pred_timestep - gt_timestep)
+                    if pred_item and "predicted" in pred_item and pred_item["predicted"] is not None:
+                        pred_timestep = int(pred_item["predicted"])
+                        error = float(abs(pred_timestep - gt_timestep))
                     else:
                         # No prediction or parsing failed
-                        error = float(num_timesteps)
+                        pred_timestep = None
+                        error = float(cm_cfg.pit_noprediction_error)
                     
                     method_errors.append(error)
                     method_all_errors[method_name].append(error)
                     
                     query_results.append({
-                        "query_id": query_id,
-                        "query_type": query_type,
-                        "question": question,
+                        "id": query_id,
+                        "type": query_type,
+                        "query": question,
                         "ground_truth_timestep": gt_timestep,
-                        "predicted_timestep": pred_item["predicted"].get("timestep") if pred_item and pred_item.get("predicted") else None,
-                        "absolute_error": float(error),
+                        "predicted_timestep": pred_timestep,
+                        "absolute_error": error,
                     })
                     
-                elif query_type == "action_duration":
+                elif query_type == "range":
                     # Ground truth ranges (inclusive)
-                    gt_ranges = ground_truth["ranges"]
+                    gt_ranges = annotation["ranges"]
                     
                     if pred_item and pred_item.get("predicted"):
-                        pred_ranges = pred_item["predicted"]["ranges"]
-                        iou = compute_temporal_iou(gt_ranges, pred_ranges, num_timesteps)
+                        pred_ranges = pred_item["predicted"]
+                        iou = compute_temporal_iou(gt_ranges, pred_ranges, cm_cfg.n_timesteps)
                     else:
                         # No prediction or parsing failed
                         iou = 0.0
@@ -335,13 +324,16 @@ def compute_temporal_metrics(cfg: DictConfig):
                     method_all_ious[method_name].append(iou)
                     
                     query_results.append({
-                        "query_id": query_id,
-                        "query_type": query_type,
-                        "question": question,
+                        "id": query_id,
+                        "type": query_type,
+                        "query": question,
                         "ground_truth_ranges": gt_ranges,
-                        "predicted_ranges": pred_item["predicted"].get("ranges") if pred_item and pred_item.get("predicted") else None,
-                        "iou": float(iou),
+                        "predicted_ranges": pred_ranges,
+                        "iou": iou,
                     })
+
+                else:
+                    raise ValueError(f"Unsupported query type for {clip_name} {query_id}: {query_type}")
             
             # Compute per-method averages for this clip
             clip_results[method_name] = {
@@ -369,9 +361,9 @@ def compute_temporal_metrics(cfg: DictConfig):
             "std_absolute_error": round(float(np.std(errors)), 2) if errors else None,
             "mean_iou": round(float(np.mean(ious)), 3) if ious else None,
             "std_iou": round(float(np.std(ious)), 3) if ious else None,
-            "num_onset_queries": len(errors),
-            "num_duration_queries": len(ious),
-            "total_queries": len(errors) + len(ious),
+            "num_pit_queries": len(errors),
+            "num_range_queries": len(ious),
+            "num_queries": len(errors) + len(ious),
         }
     
     with aggregated_file.open("w") as f:
@@ -413,7 +405,7 @@ def compute_temporal_iou(gt_ranges: list[list[int]], pred_ranges: list[list[int]
     intersection = len(gt_timesteps & pred_timesteps)
     union = len(gt_timesteps | pred_timesteps)
     
-    return float(intersection) / float(union) if union > 0 else 0.0
+    return float(intersection) / float(union)
 
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")
