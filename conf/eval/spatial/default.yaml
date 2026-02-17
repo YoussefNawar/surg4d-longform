@@ -4,7 +4,8 @@ dump_visualizations: true
 visualizations_dir: ${eval.output_dir}/spatial_viz
 tool_viz_dir: ${eval.output_dir}/tool_viz/spatial
 
-methods: ["frame_direct", "graph_agent"]
+methods: ["frame_direct"] #, "graph_agent"]
+# methods: ["splat_grid"]
 
 # frame direct
 frame_direct_system_prompt: |
@@ -63,3 +64,26 @@ graph_agent_prompt_template: |
 
   Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
   Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...
+
+# splat_grid
+splat_grid_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
+splat_grid_autoencoder_full_dim: ${autoencoder.full_dim}
+splat_grid_autoencoder_latent_dim: ${autoencoder.latent_dim}
+splat_grid_use_global_autoencoder: ${autoencoder.global_mode}
+splat_grid_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
+splat_grid_decode_batch_size: ${graph_extraction.decode_batch_size}
+splat_grid_gaussian_patch_size: 16
+splat_grid_gaussian_sample_ratio: 1.0
+splat_grid_opacity_threshold: 0.05
+splat_grid_system_prompt: |
+  # Task
+  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+  - You have access to a 3D Gaussian splatting representation of the scene projected to the camera view.
+
+  # Rules
+  - Think briefly, do not spend too much time.
+splat_grid_prompt_template: |
+  {question}
+
+  Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
+  Example output (format only): ... {{"x": X, "y": Y}} ...

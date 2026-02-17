@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from llm.qwen_utils import get_patched_qwen3
+from llm.qwen_utils_3d import get_custom_qwen3_3d
 from benchmark.temporal import (
     load_video_frames,
     multiframe_queries,
@@ -19,6 +20,7 @@ from benchmark.spatial import (
     frame_direct_feat_queries,
     graph_agent_feat_queries,
 )
+from benchmark.spatial_3d import splat_grid_feat_queries
 
 
 def evaluate_temporal(
@@ -109,20 +111,21 @@ def evaluate_spatial(
     cfg: DictConfig,
     model,
     processor,
+    model_3d=None,
+    processor_3d=None,
 ):
     """Run spatial grounding evaluation using frame-based and graph-based methods.
 
     Methods supported:
-      - frame_attn: Attention scores over frame patches
-      - frame_attn_refine: 2D attention proposals refined by Qwen
       - frame_direct: Direct Qwen prompting on frame to return a pixel
       - graph_agent: Agentic exploration of 3D scene graph with tools
-
-    Graph data (graph_dir) is only needed for graph_agent method.
+      - splat_grid: 3D Gaussian-to-grid positional encoding (requires 3D model)
 
     Args:
-      model: Pre-loaded Qwen model
-      processor: Pre-loaded Qwen processor
+      model: Pre-loaded patched Qwen model (for frame_direct / graph_agent)
+      processor: Pre-loaded Qwen processor (for frame_direct / graph_agent)
+      model_3d: Pre-loaded 3D patched Qwen model (for splat_grid)
+      processor_3d: Pre-loaded Qwen processor (for splat_grid)
     """
     # skip this if no eval config is set
     if cfg.eval is None or cfg.eval.spatial is None:
@@ -131,7 +134,7 @@ def evaluate_spatial(
     # which methods to run
     methods_to_run = set(cfg.eval.spatial.methods)
 
-    # graph data (only needed for graph_agent)
+    # graph data (needed for graph_agent and splat_grid)
     graph_dir = Path(cfg.output_root) / clip.name / cfg.eval.paths.graph_subdir
 
     # load gt data
@@ -164,6 +167,18 @@ def evaluate_spatial(
             clip=clip,
             cfg=cfg,
         )
+
+    if "splat_grid" in methods_to_run:
+        # 3D Gaussian-to-grid positional encoding (requires 3D patched model)
+        all_results["splat_grid"] = splat_grid_feat_queries(
+            model=model_3d,
+            processor=processor_3d,
+            graph_dir=graph_dir,
+            clip_gt=gt_data,
+            clip=clip,
+            cfg=cfg,
+        )
+
     out_dir = Path(cfg.eval.spatial.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions_file = out_dir / f"{clip.name}.json"
@@ -175,6 +190,7 @@ def evaluate_spatial(
         viz_method_names = {
             "frame_direct": "frame_direct",
             "graph_agent": "graph_agent",
+            "splat_grid": "splat_grid",
         }
         for method_key, viz_name in viz_method_names.items():
             if method_key in all_results:
@@ -198,14 +214,42 @@ def main(cfg: DictConfig):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(42)
 
-    model, processor = get_patched_qwen3(
-        size=cfg.eval.qwen3_size,
-        use_fp8=cfg.eval.qwen3_use_fp8,
-    )
+    # Determine which models are needed based on active methods
+    needs_normal_model = False
+    needs_3d_model = False
+
+    if cfg.eval is not None and cfg.eval.temporal is not None:
+        needs_normal_model = True
+
+    if cfg.eval is not None and cfg.eval.spatial is not None:
+        spatial_methods = set(cfg.eval.spatial.methods)
+        if spatial_methods & {"frame_direct", "graph_agent"}:
+            needs_normal_model = True
+        if "splat_grid" in spatial_methods:
+            needs_3d_model = True
+
+    model, processor = None, None
+    model_3d, processor_3d = None, None
+
+    if needs_normal_model:
+        model, processor = get_patched_qwen3(
+            size=cfg.eval.qwen3_size,
+            use_fp8=cfg.eval.qwen3_use_fp8,
+        )
+
+    if needs_3d_model:
+        model_3d, processor_3d = get_custom_qwen3_3d(
+            size=cfg.eval.qwen3_size,
+            use_fp8=cfg.eval.qwen3_use_fp8,
+        )
 
     for clip in tqdm(cfg.clips, desc="Evaluating clips", unit="clip"):
         evaluate_temporal(clip=clip, cfg=cfg, model=model, processor=processor)
-        evaluate_spatial( clip=clip, cfg=cfg, model=model, processor=processor)
+        evaluate_spatial(
+            clip=clip, cfg=cfg,
+            model=model, processor=processor,
+            model_3d=model_3d, processor_3d=processor_3d,
+        )
 
 if __name__ == "__main__":
     main()

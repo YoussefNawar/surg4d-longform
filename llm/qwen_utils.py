@@ -34,6 +34,7 @@ QWEN_CONSTANTS = {
         "spatial_merge": 2,
         "effective_patch_size": 32,  # 16 * 2
         "num_deepstack_layers": 3,
+        "temporal_patch_size": 2
     },
 }
 
