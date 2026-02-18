@@ -4,7 +4,7 @@ dump_visualizations: true
 visualizations_dir: ${eval.output_dir}/spatial_viz
 tool_viz_dir: ${eval.output_dir}/tool_viz/spatial
 
-methods: ["frame_direct"] #, "graph_agent"]
+methods: ["graph_agent_semantics"] #, "frame_direct", "graph_agent"]
 # methods: ["splat_grid"]
 
 # frame direct
@@ -60,6 +60,49 @@ graph_agent_system_prompt: |
   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
   - Think briefly, do not spend too much time on each turn.
 graph_agent_prompt_template: |
+  {question}
+
+  Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
+  Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...
+
+# graph agent with semantic labels
+graph_agent_semantics_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
+graph_agent_semantics_autoencoder_full_dim: ${autoencoder.full_dim}
+graph_agent_semantics_autoencoder_latent_dim: ${autoencoder.latent_dim}
+graph_agent_semantics_use_global_autoencoder: ${autoencoder.global_mode}
+graph_agent_semantics_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
+graph_agent_semantics_max_iterations: 20
+graph_agent_semantics_tools:
+  - name: node_overlap_position_at_time
+    max_calls: null
+  - name: inspect_highres_node_at_time
+    max_calls: 5
+  - name: voxelize_scene
+    max_calls: 3
+graph_agent_semantics_system_prompt: |
+  # Task
+  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+  - Your initial scene representation is a set of nodes from a single timestep.
+  - Use have access to tools to explore full scene.
+
+  # Scene representation
+  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
+  - The scene consists of 20 timesteps.
+  - The scene is reconstructed from a laparoscopic camera view.
+  - Coordinate system:
+    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
+    - laparoscopic camera looks in positive z direction
+    - the coordinate system is rouglhly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
+    - increase in x means movement to the right
+    - increase in y means movement to the bottom
+    - increase in z means movement away from the camera
+  - The nodes were created by clustering the scene points and do not perfectly match actual scene objects.
+    - Single scene objects might be split into multiple adjacent nodes.
+
+  # Rules
+  - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
+  - Think briefly, do not spend too much time on each turn.
+graph_agent_semantics_prompt_template: |
   {question}
 
   Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!

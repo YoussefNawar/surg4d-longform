@@ -28,6 +28,7 @@ precluster_opacity_threshold: 0.05
 
 # clustering
 cluster_method: spectral # one of: [spectral, precomputed, hdbscan, full_hdbscan]
+min_cluster_size: -1
 
 full_hdbscan_clustering:
   soft_clustering: true

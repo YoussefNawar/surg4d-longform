@@ -191,6 +191,18 @@ def evaluate_spatial(
             clip_gt=gt_data,
             clip=clip,
             cfg=cfg,
+            use_semantic_labels=False,
+        )
+
+    if "graph_agent_semantics" in methods_to_run:
+        all_results["graph_agent_semantics"] = graph_agent_feat_queries(
+            model=model,
+            processor=processor,
+            graph_dir=graph_dir,
+            clip_gt=gt_data,
+            clip=clip,
+            cfg=cfg,
+            use_semantic_labels=True,
         )
 
     if "splat_grid" in methods_to_run:
@@ -252,7 +264,7 @@ def main(cfg: DictConfig):
 
     if cfg.eval is not None and cfg.eval.spatial is not None:
         spatial_methods = set(cfg.eval.spatial.methods)
-        if spatial_methods & {"frame_direct", "graph_agent"}:
+        if spatial_methods & {"frame_direct", "graph_agent", "graph_agent_semantics"}:
             needs_normal_model = True
         if "splat_grid" in spatial_methods:
             needs_3d_model = True

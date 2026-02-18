@@ -161,3 +161,30 @@ def parse_cholecseg8k_instance_mask(instance_mask: Image.Image):
         test[single_channel == rgb_val] = 1
 
     return class_ids
+
+
+def get_semantic_label_from_class_id(class_id: int) -> str:
+    """Get semantic label string from class ID.
+    
+    Args:
+        class_id: Semantic class ID (0-12)
+    
+    Returns:
+        Semantic label string
+    """
+    class_id_to_name = {
+        0: "Black Background",
+        1: "Abdominal Wall",
+        2: "Liver",
+        3: "Gastrointestinal Tract",
+        4: "Fat",
+        5: "Grasper",
+        6: "Connective Tissue",
+        7: "Blood",
+        8: "Cystic Duct",
+        9: "L-hook Electrocautery",
+        10: "Gallbladder",
+        11: "Hepatic Vein",
+        12: "Liver Ligament",
+    }
+    return class_id_to_name.get(class_id, f"Unknown-{class_id}")

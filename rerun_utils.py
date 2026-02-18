@@ -35,6 +35,7 @@ def log_points_through_time(
     cluster_correspondences: np.ndarray,
     patch_lf_through_time: np.ndarray,
     instance_lf_through_time: np.ndarray,
+    semantic_labels: dict[int, str] = None,
 ):
     """Log cluster pointclouds (points + cluster means) over time to Rerun.
 
@@ -48,6 +49,7 @@ def log_points_through_time(
         cluster_correspondences: Cluster correspondences of shape (C, n_queries).
         patch_lf_through_time: Patch language features per timestep; shape (T, N, D).
         instance_lf_through_time: Instance language features per timestep; shape (T, N, D).
+        semantic_labels: Optional dict mapping cluster_id -> semantic label string.
     """
     cluster_ids = np.unique(clusters)
 
@@ -147,14 +149,25 @@ def log_points_through_time(
         if text_queries is not None and cluster_correspondences is not None:
             mean_labels = []
             for c in cluster_ids:
-                mean_labels.append(
-                    "\n".join(
-                        [
-                            f"{text_queries[i]}\t\t{cluster_correspondences[i, c]:.2f}"
-                            for i in range(len(text_queries))
-                        ]
-                    )
-                )
+                label_parts = []
+                # Add semantic label first if available
+                if semantic_labels is not None and c in semantic_labels:
+                    label_parts.append(f"Semantic: {semantic_labels[c]}")
+                # Add text query correspondences
+                label_parts.extend([
+                    f"{text_queries[i]}\t\t{cluster_correspondences[i, c]:.2f}"
+                    for i in range(len(text_queries))
+                ])
+                mean_labels.append("\n".join(label_parts))
+        elif semantic_labels is not None:
+            # Only semantic labels, no text queries
+            mean_labels = []
+            for c in cluster_ids:
+                if c in semantic_labels:
+                    mean_labels.append(f"Semantic: {semantic_labels[c]}")
+                else:
+                    mean_labels.append(None)
+        
         means_viz = rr.Points3D(
             positions=cluster_means,
             colors=mean_colors,

@@ -179,6 +179,7 @@ def qwen_encode_image(
     image: Image.Image,
     model,
     processor,
+    return_hw = False,
 ):
     """Encode an image through a Qwen vision encoder.
 
@@ -200,7 +201,10 @@ def qwen_encode_image(
             pixel_values, image_grid_thw
         )
         main_feats = torch.cat(main_embeds_tuple, dim=0)
-        return qwen3_deepstack_to_cat(main_feats, deepstack_embeds)
+        cat = qwen3_deepstack_to_cat(main_feats, deepstack_embeds)
+        if return_hw:
+            return cat, (image_grid_thw[0, 1].item(), image_grid_thw[0, 2].item())
+        return cat
 
 
 def _set_generation_seed(seed: int) -> None:
@@ -337,7 +341,7 @@ def model_inputs(
         if part.get("type") == "image"
     )
     assert n_msg_images == len(vision_features), (
-        "number of messages and vision features must match"
+        f"number of image messages ({n_msg_images}) and vision features ({len(vision_features)}) must match"
     )
 
     # create actual text template from messages dict
@@ -359,13 +363,17 @@ def model_inputs(
         mock_img = Image.new("RGB", (img_w, img_h), color="red")
         mock_images.append(mock_img)
 
-    inputs = processor(
-        text=text,
-        images=mock_images,
-        padding=True,
-        return_tensors="pt",
-        do_resize=False,
-    )
+    # Only pass images parameter if there are actual images
+    processor_kwargs = {
+        "text": text,
+        "padding": True,
+        "return_tensors": "pt",
+        "do_resize": False,
+    }
+    if mock_images:
+        processor_kwargs["images"] = mock_images
+
+    inputs = processor(**processor_kwargs)
 
     return inputs
 
@@ -734,9 +742,14 @@ def generate_with_vision_features_agentic(
             print(f"\n[{timestamp}] --- Iteration {iteration} ---", flush=True)
 
         # Convert accumulated features to deepstack format for this iteration
-        main_features, deepstack_features = qwen3_cat_to_deepstack_multiple(
-            all_vision_features
-        )
+        if all_vision_features:
+            main_features, deepstack_features = qwen3_cat_to_deepstack_multiple(
+                all_vision_features
+            )
+        else:
+            # Handle empty vision features case
+            main_features = []
+            deepstack_features = []
 
         # Generate response with tools
         inputs = model_inputs(
@@ -1053,6 +1066,128 @@ def prompt_graph_agent(
     return generate_with_vision_features_agentic(
         messages=messages,
         vision_features=[torch.Tensor(f) for f in node_feats],
+        model=model,
+        processor=processor,
+        tools=tools,
+        max_iterations=max_iterations,
+        tool_call_limits=tool_call_limits,
+        verbose=verbose,
+        seed=seed,
+        max_new_tokens=max_new_tokens,
+        max_thinking_tokens=max_thinking_tokens,
+        zero_positional_encodings=zero_positional_encodings,
+    )
+
+
+def prompt_graph_agent_with_semantic_labels(
+    question: str,
+    initial_timestep_idx: int,
+    node_centers: np.ndarray,
+    node_centroids: np.ndarray,
+    node_extents: np.ndarray,
+    node_semantic_labels: dict[int, str],
+    model: Union[Qwen2_5_VLForConditionalGeneration, Qwen3VLForConditionalGeneration],
+    processor: Union[Qwen2_5_VLProcessor, Qwen3VLProcessor],
+    tools: Dict[str, Tuple[Callable, Dict[str, Any]]],
+    system_prompt: str = None,
+    max_iterations: int = 20,
+    tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
+    verbose: bool = False,
+    seed: int = 42,
+    max_new_tokens: int = 8192,
+    max_thinking_tokens: Optional[int] = None,
+    zero_positional_encodings: bool = True,
+):
+    """
+    node_feats: np.lib.npyio.NpzFile - npz file containing node features for each timestep
+    timestep_idx: int - index of the timestep to use for the node features
+    adjacency_matrices: np.ndarray - adjacency matrices through time - weights are bhattacharyya coefficients (timesteps, n_clusters, n_clusters)
+    node_centers: np.ndarray - cluster centers through time (timesteps, n_clusters, 3)
+    node_centroids: np.ndarray - cluster centroids through time (timesteps, n_clusters, 3)
+    node_extents: np.ndarray - cluster extents through time (timesteps, n_clusters, 3)
+    model: Qwen2_5_VLForConditionalGeneration - model to use
+    processor: Qwen2_5_VLProcessor - processor to use
+    system_prompt: str - system prompt to use
+    tools: Dict[str, Tuple[Callable, Dict[str, Any]]] - tools to use
+    verbose: If True, prints message and tool results at each iteration.
+    max_new_tokens: int - maximum number of new tokens to generate
+    max_thinking_tokens: int - maximum tokens for thinking phase per iteration (Qwen3 only).
+        If None, no limit is applied. If 0, thinking is disabled immediately.
+    zero_positional_encodings: Whether to zero out h and w for positional encodings
+    """
+    assert tools is not None and len(tools) > 0, (
+        "tools are required for graph agentic prompting"
+    )
+    assert len(node_centers) == len(node_centroids) == len(node_extents), (
+        "timestep mismatch"
+    )
+
+    # node feat indices correspond to cluster ids
+    centroids = node_centroids[initial_timestep_idx]
+    extents = node_extents[initial_timestep_idx]
+    centers = node_centers[initial_timestep_idx]
+
+    # Build JSON structure (no image placeholders - semantic labels only)
+    nodes_data = []
+    for n in range(centroids.shape[0]):
+        nodes_data.append(
+            {
+                "node_id": int(n),
+                "semantic_label": node_semantic_labels[str(n)],
+                "centroid": {
+                    "x": round(float(centroids[n][0]), 2),
+                    "y": round(float(centroids[n][1]), 2),
+                    "z": round(float(centroids[n][2]), 2),
+                },
+                "bbox_center": {
+                    "x": round(float(centers[n][0]), 2),
+                    "y": round(float(centers[n][1]), 2),
+                    "z": round(float(centers[n][2]), 2),
+                },
+                "bbox_extent": {
+                    "x": round(float(extents[n][0]), 2),
+                    "y": round(float(extents[n][1]), 2),
+                    "z": round(float(extents[n][2]), 2),
+                },
+            }
+        )
+
+    graph_data = {
+        "timestep": int(initial_timestep_idx),
+        "nodes": nodes_data,
+    }
+
+    # Serialize to JSON (no image placeholders in this version)
+    graph_json = json.dumps(graph_data, indent=2)
+    graph_content = [{"type": "text", "text": graph_json}]
+
+    # Add tool call limits information to the prompt (as JSON)
+    tool_limits_content = []
+    if tool_call_limits is not None:
+        tool_limits_data = {}
+        for tool_name in tools.keys():
+            limit = tool_call_limits.get(tool_name, None)
+            tool_limits_data[tool_name] = "infinite" if limit is None else limit
+
+        tool_limits_json = json.dumps({"tool_call_limits": tool_limits_data}, indent=2)
+        tool_limits_content.append({"type": "text", "text": tool_limits_json + "\n\n"})
+
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+        {
+            "role": "user",
+            "content": [
+                *graph_content,
+                {"type": "text", "text": "\n\n"},
+                *tool_limits_content,
+                {"type": "text", "text": question},
+            ],
+        },
+    ]
+
+    return generate_with_vision_features_agentic(
+        messages=messages,
+        vision_features=[],
         model=model,
         processor=processor,
         tools=tools,

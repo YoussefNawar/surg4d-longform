@@ -13,6 +13,7 @@ import rerun as rr
 import random
 import hydra
 import os
+import json
 from omegaconf import DictConfig
 from tqdm import tqdm
 import gc
@@ -881,13 +882,62 @@ def clusters_to_rgb(clusters: np.ndarray) -> np.ndarray:
     return pal[clusters]
 
 
-def load_precomputed_instance_clusters(clip: DictConfig, cfg: DictConfig) -> np.ndarray:
+def filter_and_reindex_clusters(
+    clusters: np.ndarray,
+    min_cluster_size: int,
+    semantic_labels: dict[int, str] = None,
+) -> tuple[np.ndarray, dict[int, str] | None]:
+    """Filter small clusters and remap valid cluster ids to contiguous ids starting from 0.
+
+    Args:
+        clusters: (N,) cluster ids, with -1 indicating noise.
+        min_cluster_size: Minimum size for valid clusters. If -1, keep all non-noise clusters.
+        semantic_labels: Optional mapping from original cluster id -> semantic label.
+
+    Returns:
+        remapped_clusters: (N,) clusters with small clusters set to -1 and valid ids remapped to [0..C-1].
+        remapped_semantic_labels: Optional mapping aligned to remapped cluster ids.
+    """
+    clusters = clusters.copy()
+
+    if min_cluster_size != -1:
+        valid_clusters = clusters[clusters >= 0]
+        cluster_ids, cluster_counts = np.unique(valid_clusters, return_counts=True)
+        small_cluster_ids = cluster_ids[cluster_counts < min_cluster_size]
+        if len(small_cluster_ids) > 0:
+            clusters[np.isin(clusters, small_cluster_ids)] = -1
+        logger.info(
+            f"Filtered {len(small_cluster_ids)} clusters below min size {min_cluster_size}"
+        )
+
+    valid_cluster_ids = np.unique(clusters[clusters >= 0])
+    remapped_clusters = np.full_like(clusters, fill_value=-1)
+    if len(valid_cluster_ids) > 0:
+        remapped_clusters[clusters >= 0] = np.searchsorted(
+            valid_cluster_ids, clusters[clusters >= 0]
+        ).astype(remapped_clusters.dtype)
+
+    remapped_semantic_labels = None
+    if semantic_labels is not None:
+        remapped_semantic_labels = {
+            int(new_id): semantic_labels[int(old_id)]
+            for new_id, old_id in enumerate(valid_cluster_ids)
+            if int(old_id) in semantic_labels
+        }
+        logger.info(
+            f"Remapped semantic labels for {len(remapped_semantic_labels)} clusters"
+        )
+
+    return remapped_clusters, remapped_semantic_labels
+
+
+def load_precomputed_instance_clusters(clip: DictConfig, cfg: DictConfig, precluster_mask: np.ndarray) -> np.ndarray:
     """Load precomputed merged instance assignments from CoTracker preprocessing.
 
     Args:
         clip: Clip configuration
         cfg: Full hydra configuration
-
+        precluster_mask: (N_gaussians,) mask of gaussians to keep
     Returns:
         clusters: (N_gaussians,) array of instance IDs, -1 for background/unassigned
     """
@@ -895,6 +945,7 @@ def load_precomputed_instance_clusters(clip: DictConfig, cfg: DictConfig) -> np.
     merged_ids_path = clip_dir / "cotracker" / "merged_instance_ids.npy"
 
     clusters = np.load(merged_ids_path)
+    clusters = clusters[precluster_mask]
 
     n_noise = (clusters == -1).sum()
     print(f"[precomputed] unassigned noise: {n_noise}")
@@ -1217,16 +1268,40 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         "hdbscan",
         "full_hdbscan",
     ]
+    semantic_labels = None
     if cfg.graph_extraction.cluster_method == "spectral":
         clusters = spectral_cluster_gaussians(gaussians, cfg=cfg)
     if cfg.graph_extraction.cluster_method == "precomputed":
-        clusters = load_precomputed_instance_clusters(clip, cfg)
+        clusters = load_precomputed_instance_clusters(clip, cfg, precluster_mask=mask.detach().cpu().numpy())
+        # Load semantic labels for precomputed clusters
+        clip_dir = Path(cfg.preprocessed_root) / clip.name
+        semantic_labels_path = clip_dir / "cotracker" / "merged_instance_semantic_labels.json"
+        if semantic_labels_path.exists():
+            with open(semantic_labels_path, "r") as f:
+                semantic_labels_raw = json.load(f)
+                # Convert string keys to int keys
+                semantic_labels = {int(k): v for k, v in semantic_labels_raw.items()}
+            logger.info(f"Loaded semantic labels for {len(semantic_labels)} clusters")
+        else:
+            logger.warning(f"Semantic labels file not found: {semantic_labels_path}")
     if cfg.graph_extraction.cluster_method == "full_hdbscan":
         clusters = full_hdbscan_cluster_gaussians(gaussians, cfg=cfg)
     if cfg.graph_extraction.cluster_method == "hdbscan":
         clusters = hdbscan_cluster_gaussians(
             gaussians, cfg=cfg, histogram_output_dir=graph_output_dir
         )
+
+    print('BEFORE')
+    print(np.unique(clusters, return_counts=True))
+    print(semantic_labels)
+    clusters, semantic_labels = filter_and_reindex_clusters(
+        clusters=clusters,
+        min_cluster_size=cfg.graph_extraction.min_cluster_size,
+        semantic_labels=semantic_labels,
+    )
+    print('AFTER')
+    print(np.unique(clusters, return_counts=True))
+    print(semantic_labels)
 
     # post-clustering filtering
     logger.info(f"Post-clustering filtering...")
@@ -1302,6 +1377,12 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     np.save(
         out / "patch_latents_through_time.npy", lf_patch_through_time
     )  # patch latents through time (timesteps, n_filtered_gaussians, lang_dim)
+    if semantic_labels is not None:
+        with open(out / "cluster_semantics.json", "w") as f:
+            json.dump({str(k): v for k, v in semantic_labels.items()}, f, indent=2)
+        logger.info(
+            f"Saved adapted semantic labels to {out / 'merged_instance_semantic_labels.json'}"
+        )
 
     # matplotlib 3D latent feature visualizations
     logger.info(f"Creating cluster latent visualizations...")
@@ -1328,6 +1409,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         cluster_correspondences=None,
         patch_lf_through_time=lf_patch_through_time,
         instance_lf_through_time=lf_instance_through_time,
+        semantic_labels=semantic_labels,
     )
     log_graph_structure_through_time(
         cluster_pos_through_time=cluster_pos_through_time,

@@ -1,4 +1,5 @@
 import gc
+import json
 from pathlib import Path
 from omegaconf import DictConfig
 import torch
@@ -13,6 +14,7 @@ from benchmark.serialization_utils import sanitize_tool_calls, parse_json
 from llm.qwen_utils import (
     prompt_graph_agent,
     ask_qwen_about_image,
+    prompt_graph_agent_with_semantic_labels,
 )
 from llm.tools import GraphTools
 from autoencoder.model_qwen import QwenAutoencoder
@@ -151,6 +153,7 @@ def graph_agent_feat_queries(
     clip_gt: Dict[str, Any],
     clip: DictConfig,
     cfg: DictConfig,
+    use_semantic_labels: bool = False,
 ):
     """Run graph agent with tools across all queries for a clip.
 
@@ -180,19 +183,45 @@ def graph_agent_feat_queries(
     adjacency = np.load(adjacency_path)
     bhattacharyya_coeffs = np.load(bhattacharyya_path)
 
+    if use_semantic_labels:
+        semantic_labels_path = graph_dir / "merged_instance_semantic_labels.json"
+        with open(semantic_labels_path, "r") as f:
+            node_semantic_labels = json.load(f)
+
+    if use_semantic_labels:
+        autoencoder_checkpoint_subdir = cfg.eval.spatial.graph_agent_semantics_autoencoder_checkpoint_subdir
+        autoencoder_full_dim = cfg.eval.spatial.graph_agent_semantics_autoencoder_full_dim
+        autoencoder_latent_dim = cfg.eval.spatial.graph_agent_semantics_autoencoder_latent_dim
+        autoencoder_use_global_autoencoder = cfg.eval.spatial.graph_agent_semantics_use_global_autoencoder
+        global_autoencoder_checkpoint_dir = cfg.eval.spatial.graph_agent_semantics_global_autoencoder_checkpoint_dir
+        max_iterations = cfg.eval.spatial.graph_agent_semantics_max_iterations
+        tools = cfg.eval.spatial.graph_agent_semantics_tools
+        system_prompt = cfg.eval.spatial.graph_agent_semantics_system_prompt
+        prompt_template = cfg.eval.spatial.graph_agent_semantics_prompt_template
+    else:
+        autoencoder_checkpoint_subdir = cfg.eval.spatial.graph_agent_autoencoder_checkpoint_subdir
+        autoencoder_full_dim = cfg.eval.spatial.graph_agent_autoencoder_full_dim
+        autoencoder_latent_dim = cfg.eval.spatial.graph_agent_autoencoder_latent_dim
+        autoencoder_use_global_autoencoder = cfg.eval.spatial.graph_agent_use_global_autoencoder
+        global_autoencoder_checkpoint_dir = cfg.eval.spatial.graph_agent_global_autoencoder_checkpoint_dir
+        max_iterations = cfg.eval.spatial.graph_agent_max_iterations
+        tools = cfg.eval.spatial.graph_agent_tools
+        system_prompt = cfg.eval.spatial.graph_agent_system_prompt
+        prompt_template = cfg.eval.spatial.graph_agent_prompt_template
+
     # Keep agent context/tool responses in the same normalized space; convert
     # final model prediction back to original space right before projection/logging.
     point_o2n, point_n2o, distance_o2n, _ = get_coord_transformations(positions)
 
     # Load autoencoder for inspect_highres_node_at_time tool
-    if cfg.eval.spatial.graph_agent_use_global_autoencoder:
-        autoencoder_path = Path(cfg.preprocessed_root) / cfg.eval.spatial.graph_agent_global_autoencoder_checkpoint_dir / "best_ckpt.pth"
+    if autoencoder_use_global_autoencoder:
+        autoencoder_path = Path(cfg.preprocessed_root) / global_autoencoder_checkpoint_dir / "best_ckpt.pth"
     else:
         clip_dir = Path(cfg.preprocessed_root) / clip.name
-        autoencoder_path = clip_dir / cfg.eval.spatial.graph_agent_autoencoder_checkpoint_subdir / "best_ckpt.pth"
+        autoencoder_path = clip_dir / autoencoder_checkpoint_subdir / "best_ckpt.pth"
     autoencoder = QwenAutoencoder(
-        input_dim=cfg.eval.spatial.graph_agent_autoencoder_full_dim,
-        latent_dim=cfg.eval.spatial.graph_agent_autoencoder_latent_dim,
+        input_dim=autoencoder_full_dim,
+        latent_dim=autoencoder_latent_dim,
     ).to(model.device)
     autoencoder.load_state_dict(
         torch.load(autoencoder_path, map_location=model.device)
@@ -265,12 +294,28 @@ def graph_agent_feat_queries(
             sanitized_query = re.sub(r'[^\w\s-]', '', question)  # Remove special chars
             sanitized_query = re.sub(r'\s+', '_', sanitized_query)  # Replace whitespace with _
             sanitized_query = sanitized_query[:50]  # Limit length
-            rrd_filename = f"t{timestep:03d}_{query_id}_{sanitized_query}.rrd"
+            rrd_filename = f"t{timestep:03d}_{query_id}_{sanitized_query}{'_semantics' if use_semantic_labels else ''}.rrd"
             rrd_file = tool_viz_dir / rrd_filename
             graph_tools.start_recording(str(rrd_file))
 
         # llm answer
-        agent_result = prompt_graph_agent(
+        if use_semantic_labels:
+            agent_result = prompt_graph_agent_with_semantic_labels(
+                question=prompt,
+                initial_timestep_idx=timestep,
+                node_centers=point_n2o(node_centers),
+                node_centroids=point_n2o(node_centroids),
+                node_extents=distance_o2n(node_extents),
+                node_semantic_labels=node_semantic_labels,
+                model=model,
+                processor=processor,
+                tools=tools,
+                system_prompt=system_prompt,
+                max_iterations=max_iterations,
+                tool_call_limits=tool_call_limits,
+            )
+        else:
+            agent_result = prompt_graph_agent(
             question=prompt,
             node_feats=node_feats_npz,
             initial_timestep_idx=timestep,

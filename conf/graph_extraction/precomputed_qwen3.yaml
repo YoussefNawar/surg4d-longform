@@ -27,6 +27,7 @@ precluster_opacity_threshold: 0.05
 
 # clustering
 cluster_method: precomputed # one of: [spectral, precomputed]
+min_cluster_size: 150
 
 # # spectral clustering
 # spectral_clustering:
@@ -44,8 +45,8 @@ cluster_method: precomputed # one of: [spectral, precomputed]
 #   rbf_sigma_lf_factor: 2.0
 
 # how many vision features represent each cluster
-max_features_per_cluster: 40
-min_features_per_cluster: 4
+feature_selection: opacity # one of: [opacity, random]
+features_per_cluster: 64
 
 # lf decoding
 decode_batch_size: 16384
