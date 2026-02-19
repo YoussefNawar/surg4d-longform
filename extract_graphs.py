@@ -19,6 +19,7 @@ from tqdm import tqdm
 import gc
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.neighbors import LocalOutlierFactor
 from mpl_toolkits.mplot3d import Axes3D
 
 from utils.params_utils import merge_hparams
@@ -932,6 +933,83 @@ def filter_and_reindex_clusters(
     return remapped_clusters, remapped_semantic_labels
 
 
+def temporal_lof_outlier_mask(
+    positions_through_time: np.ndarray,
+    clusters: np.ndarray,
+    cfg: DictConfig,
+    histogram_output_dir: Path | None = None,
+) -> np.ndarray:
+    """Flag gaussians that are strong LOF outliers in any cluster at any timestep.
+
+    Args:
+        positions_through_time: (T, N, 3) gaussian positions through time.
+        clusters: (N,) contiguous cluster ids.
+        cfg: Full hydra config.
+
+    Returns:
+        outlier_mask: (N,) True where gaussian is a strong outlier at >=1 timestep.
+    """
+    lof_cfg = cfg.graph_extraction.temporal_lof_outlier_filter
+    unique_clusters = np.unique(clusters)
+    outlier_mask = np.zeros(clusters.shape[0], dtype=bool)
+    all_negative_outlier_factors = []
+
+    for timestep_idx in range(positions_through_time.shape[0]):
+        positions = positions_through_time[timestep_idx]
+        for cluster_id in unique_clusters:
+            cluster_indices = np.where(clusters == cluster_id)[0]
+            if cluster_indices.shape[0] < lof_cfg.min_cluster_points:
+                continue
+
+            n_neighbors = min(lof_cfg.n_neighbors, cluster_indices.shape[0] - 1)
+            lof = LocalOutlierFactor(
+                n_neighbors=n_neighbors,
+                contamination=lof_cfg.contamination,
+            )
+            cluster_positions = positions[cluster_indices]
+            lof_labels = lof.fit_predict(cluster_positions)
+            all_negative_outlier_factors.append(lof.negative_outlier_factor_)
+            strong_outlier_mask = (lof_labels == -1) & (
+                lof.negative_outlier_factor_
+                < lof_cfg.strong_negative_outlier_factor_threshold
+            )
+            outlier_mask[cluster_indices[strong_outlier_mask]] = True
+
+    if histogram_output_dir is not None and len(all_negative_outlier_factors) > 0:
+        all_negative_outlier_factors = np.concatenate(all_negative_outlier_factors, axis=0)
+        plot_negative_outlier_factors = all_negative_outlier_factors[
+            (all_negative_outlier_factors >= -5.0) & (all_negative_outlier_factors <= 0.0)
+        ]
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.hist(
+            plot_negative_outlier_factors,
+            bins=100,
+            range=(-5.0, 0.0),
+            edgecolor="black",
+            alpha=0.75,
+        )
+        if -5.0 <= lof_cfg.strong_negative_outlier_factor_threshold <= 0.0:
+            ax.axvline(
+                lof_cfg.strong_negative_outlier_factor_threshold,
+                color="red",
+                linestyle="--",
+                linewidth=2,
+                label=f"strong threshold={lof_cfg.strong_negative_outlier_factor_threshold}",
+            )
+            ax.legend(loc="upper left")
+        ax.set_xlim(-5.0, 0.0)
+        ax.set_title("LOF Negative Outlier Factor Distribution (Global)")
+        ax.set_xlabel("negative_outlier_factor")
+        ax.set_ylabel("Count")
+        fig.tight_layout()
+        fig.savefig(
+            histogram_output_dir / "lof_negative_outlier_factor_hist_global.png", dpi=150
+        )
+        plt.close(fig)
+
+    return outlier_mask
+
+
 def load_precomputed_instance_clusters(clip: DictConfig, cfg: DictConfig, precluster_mask: np.ndarray) -> np.ndarray:
     """Load precomputed merged instance assignments from CoTracker preprocessing.
 
@@ -1292,6 +1370,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
             gaussians, cfg=cfg, histogram_output_dir=graph_output_dir
         )
 
+    # filter small clusters and reindex to contiguous ids
     print('BEFORE')
     print(np.unique(clusters, return_counts=True))
     print(semantic_labels)
@@ -1303,20 +1382,36 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     print('AFTER')
     print(np.unique(clusters, return_counts=True))
     print(semantic_labels)
-
-    # post-clustering filtering
     logger.info(f"Post-clustering filtering...")
     cluster_mask = clusters >= 0
     filter_gaussians(gaussians, cluster_mask)
     clusters = clusters[cluster_mask]
 
-    # cluster properties
-    logger.info(f"Computing cluster features...")
     timesteps = np.linspace(0, 1, cfg.graph_extraction.n_timesteps)
     deformed_data = [deform_at_timestep(gaussians, t) for t in timesteps]
     pos_through_time = np.stack([i[0] for i in deformed_data])
     lf_patch_through_time = np.stack([i[1] for i in deformed_data])
     lf_instance_through_time = np.stack([i[2] for i in deformed_data])
+
+    logger.info(f"Temporal LOF outlier filtering...")
+    temporal_outlier_mask = temporal_lof_outlier_mask(
+        pos_through_time,
+        clusters,
+        cfg,
+        histogram_output_dir=graph_output_dir,
+    )
+    keep_mask = ~temporal_outlier_mask
+    logger.info(
+        f"Temporal LOF removed {temporal_outlier_mask.sum()} / {len(temporal_outlier_mask)} gaussians"
+    )
+    filter_gaussians(gaussians, torch.from_numpy(keep_mask).to(gaussians.get_xyz.device))
+    clusters = clusters[keep_mask]
+    pos_through_time = pos_through_time[:, keep_mask]
+    lf_patch_through_time = lf_patch_through_time[:, keep_mask]
+    lf_instance_through_time = lf_instance_through_time[:, keep_mask]
+
+    # cluster properties
+    logger.info(f"Computing cluster features...")
     (
         cluster_pos_through_time,
         cluster_center_through_time,

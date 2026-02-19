@@ -24,11 +24,17 @@ use_global_autoencoder: ${autoencoder.global_mode}
 global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
 
 # gaussian filtering before clustering
-precluster_opacity_threshold: 0.05
+precluster_opacity_threshold: 0.00
 
 # clustering
 cluster_method: precomputed # one of: [spectral, precomputed]
-min_cluster_size: 150
+min_cluster_size: 50
+
+temporal_lof_outlier_filter:
+  n_neighbors: 20
+  contamination: 0.1
+  min_cluster_points: 20
+  strong_negative_outlier_factor_threshold: -1.2
 
 # # spectral clustering
 # spectral_clustering:

@@ -235,7 +235,7 @@ spec_node_overlap_scores_through_time = {
     "type": "function",
     "function": {
         "name": "node_overlap_scores_through_time",
-        "description": "Returns the spatial overlap scores (Bhattacharyya coefficients) between two graph nodes at all timesteps. Higher values (closer to 1) indicate greater spatial overlap between the nodes' gaussian distributions; lower values (closer to 0) indicate the nodes are spatially separated.",
+        "description": "Returns the spatial overlap scores (Bhattacharyya coefficients) between two graph nodes at all timesteps. Higher values (closer to 1) indicate greater spatial overlap between the nodes' gaussian distributions; lower values (closer to 0) indicate the nodes are spatially separated. Note that Bhattacharyya coefficients are computed for a single Gaussian approximation of each node, so the scores are only a rough estimate of true spatial overlap.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -931,10 +931,10 @@ def inspect_scene_at_time(
     }
 
 
-spec_node_movement = {
+spec_node_movement_through_time = {
     "type": "function",
     "function": {
-        "name": "node_movement",
+        "name": "node_movement_through_time",
         "description": "Returns the node centroid and its movement (centroid delta to previous timestep) at each timestep.",
         "parameters": {
             "type": "object",
@@ -950,7 +950,7 @@ spec_node_movement = {
 }
 
 
-def node_movement(
+def node_movement_through_time(
     centroids: np.ndarray,
     node_id: int,
     toolkit: Optional['GraphTools'] = None,
@@ -1034,10 +1034,10 @@ def node_movement(
     }
 
 
-spec_relative_movement = {
+spec_relative_node_movement_through_time = {
     "type": "function",
     "function": {
-        "name": "relative_movement",
+        "name": "relative_node_movement_through_time",
         "description": "Returns the centroid difference vector between two nodes for all timesteps. This can be used to see if two nodes move together.",
         "parameters": {
             "type": "object",
@@ -1057,7 +1057,7 @@ spec_relative_movement = {
 }
 
 
-def relative_movement(
+def relative_node_movement_through_time(
     centroids: np.ndarray,
     node_id_1: int,
     node_id_2: int,
@@ -1662,21 +1662,21 @@ class GraphTools:
                 ),
                 spec_voxelize_scene,
             ),
-            "node_movement": (
+            "node_movement_through_time": (
                 partial(
-                    node_movement,
+                    node_movement_through_time,
                     centroids=self.point_o2n(self.centroids),
                     toolkit=self,
                 ),
-                spec_node_movement,
+                spec_node_movement_through_time,
             ),
-            "relative_movement": (
+            "relative_node_movement_through_time": (
                 partial(
-                    relative_movement,
+                    relative_node_movement_through_time,
                     centroids=self.point_o2n(self.centroids),
                     toolkit=self,
                 ),
-                spec_relative_movement,
+                spec_relative_node_movement_through_time,
             ),
         }
 

@@ -229,6 +229,7 @@ def evaluate_spatial(
         viz_method_names = {
             "frame_direct": "frame_direct",
             "graph_agent": "graph_agent",
+            "graph_agent_semantics": "graph_agent_semantics",
             "splat_grid": "splat_grid",
         }
         for method_key, viz_name in viz_method_names.items():
