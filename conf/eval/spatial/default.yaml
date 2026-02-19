@@ -15,55 +15,56 @@ frame_direct_system_prompt: |
 
   # Rules
   - Think briefly, do not spend too much time.
+  - The questions are very specific, pay close attention to all of the questions' details.
 frame_direct_prompt_template: |
   {question}
 
   Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
   Example output (format only): ... {{"x": X, "y": Y}} ...
 
-# graph agent
-graph_agent_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
-graph_agent_autoencoder_full_dim: ${autoencoder.full_dim}
-graph_agent_autoencoder_latent_dim: ${autoencoder.latent_dim}
-graph_agent_use_global_autoencoder: ${autoencoder.global_mode}
-graph_agent_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
-graph_agent_max_iterations: 20
-graph_agent_tools:
-  - name: node_overlap_position_at_time
-    max_calls: null
-  - name: inspect_highres_node_at_time
-    max_calls: 5
-  - name: voxelize_scene
-    max_calls: 3
-graph_agent_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - Your initial scene representation is a set of nodes from a single timestep.
-  - Use have access to tools to explore full scene.
+# # graph agent
+# graph_agent_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
+# graph_agent_autoencoder_full_dim: ${autoencoder.full_dim}
+# graph_agent_autoencoder_latent_dim: ${autoencoder.latent_dim}
+# graph_agent_use_global_autoencoder: ${autoencoder.global_mode}
+# graph_agent_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
+# graph_agent_max_iterations: 20
+# graph_agent_tools:
+#   - name: node_overlap_position_at_time
+#     max_calls: null
+#   - name: inspect_highres_node_at_time
+#     max_calls: 5
+#   - name: voxelize_scene
+#     max_calls: 3
+# graph_agent_system_prompt: |
+#   # Task
+#   - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+#   - Your initial scene representation is a set of nodes from a single timestep.
+#   - Use have access to tools to explore full scene.
 
-  # Scene representation
-  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
-  - The scene consists of 20 timesteps.
-  - The scene is reconstructed from a laparoscopic camera view.
-  - Coordinate system:
-    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
-    - laparoscopic camera looks in positive z direction
-    - the coordinate system is rouglhly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
-    - increase in x means movement to the right
-    - increase in y means movement to the bottom
-    - increase in z means movement away from the camera
-  - The nodes were created by clustering the scene points and do not perfectly match actual scene objects.
-    - Single scene objects might be split into multiple adjacent nodes.
-    - The nodes' rough images can contain global scene context, but should be focused on the respective object the node represents.
+#   # Scene representation
+#   - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
+#   - The scene consists of 20 timesteps.
+#   - The scene is reconstructed from a laparoscopic camera view.
+#   - Coordinate system:
+#     - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
+#     - laparoscopic camera looks in positive z direction
+#     - the coordinate system is rouglhly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
+#     - increase in x means movement to the right
+#     - increase in y means movement to the bottom
+#     - increase in z means movement away from the camera
+#   - The nodes were created by clustering the scene points and do not perfectly match actual scene objects.
+#     - Single scene objects might be split into multiple adjacent nodes.
+#     - The nodes' rough images can contain global scene context, but should be focused on the respective object the node represents.
 
-  # Rules
-  - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Think briefly, do not spend too much time on each turn.
-graph_agent_prompt_template: |
-  {question}
+#   # Rules
+#   - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
+#   - Think briefly, do not spend too much time on each turn.
+# graph_agent_prompt_template: |
+#   {question}
 
-  Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
-  Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...
+#   Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
+#   Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...
 
 # graph agent with semantic labels
 graph_agent_semantics_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
@@ -113,25 +114,25 @@ graph_agent_semantics_prompt_template: |
   Your final answer has to contain exactly one 3D point in the scene's coordinate system as a JSON object. Do not refuse!
   Example output (format only): ... {{"x": X, "y": Y, "z": Z}} ...
 
-# splat_grid
-splat_grid_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
-splat_grid_autoencoder_full_dim: ${autoencoder.full_dim}
-splat_grid_autoencoder_latent_dim: ${autoencoder.latent_dim}
-splat_grid_use_global_autoencoder: ${autoencoder.global_mode}
-splat_grid_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
-splat_grid_decode_batch_size: ${graph_extraction.decode_batch_size}
-splat_grid_gaussian_patch_size: 16
-splat_grid_gaussian_sample_ratio: 1.0
-splat_grid_opacity_threshold: 0.8
-splat_grid_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - You have access to an image of the scene.
+# # splat_grid
+# splat_grid_autoencoder_checkpoint_subdir: ${autoencoder.checkpoint_subdir}
+# splat_grid_autoencoder_full_dim: ${autoencoder.full_dim}
+# splat_grid_autoencoder_latent_dim: ${autoencoder.latent_dim}
+# splat_grid_use_global_autoencoder: ${autoencoder.global_mode}
+# splat_grid_global_autoencoder_checkpoint_dir: ${autoencoder.global_checkpoint_dir}
+# splat_grid_decode_batch_size: ${graph_extraction.decode_batch_size}
+# splat_grid_gaussian_patch_size: 16
+# splat_grid_gaussian_sample_ratio: 1.0
+# splat_grid_opacity_threshold: 0.8
+# splat_grid_system_prompt: |
+#   # Task
+#   - You are an expert visceral surgeon analyzing a cholecystectomy scene.
+#   - You have access to an image of the scene.
 
-  # Rules
-  - Think briefly, do not spend too much time.
-splat_grid_prompt_template: |
-  {question}
+#   # Rules
+#   - Think briefly, do not spend too much time.
+# splat_grid_prompt_template: |
+#   {question}
 
-  Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
-  Example output (format only): ... {{"x": X, "y": Y}} ...
+#   Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
+#   Example output (format only): ... {{"x": X, "y": Y}} ...
