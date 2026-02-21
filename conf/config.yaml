@@ -1,5 +1,5 @@
 defaults:
-  - clips: final_dataset
+  - clips: final_dataset_first
   - preprocessing: qwen3
   - graph_extraction: precomputed_qwen3
   - eval: default
@@ -16,7 +16,7 @@ skip_compute_metrics: true
 cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k
 cholect50_root: data/cholect50
-preprocessed_root: data/preprocessed/qwen3_da3_subsampled
+preprocessed_root: data/preprocessed/refactor
 output_root: output/refactor
 
 whole_pipeline_clips_sequentially: true

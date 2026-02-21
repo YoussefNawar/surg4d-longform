@@ -11,7 +11,7 @@ import rerun as rr
 import cv2
 from cotracker.predictor import CoTrackerPredictor
 from cotracker.utils.visualizer import Visualizer
-from scene.colmap_loader import (
+from utils.colmap_loader import (
     read_intrinsics_binary,
     read_extrinsics_binary,
     read_intrinsics_text,

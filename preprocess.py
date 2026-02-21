@@ -4,10 +4,7 @@ import numpy as np
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 import hydra
-from hydra.core.global_hydra import GlobalHydra
-import subprocess
 import shutil
-import sys
 import torch
 from loguru import logger
 import cv2
@@ -16,9 +13,7 @@ import re
 from depth_anything_3.api import DepthAnything3
 
 from cholec_utils import get_clip_seg8k, parse_cholecseg8k_instance_mask
-from da3_utils import da3_to_multi_view_colmap, log_da3_rerun, filter_prediction_edge_artifacts
-from scene.colmap_loader import read_points3D_binary
-from scene.dataset_readers import storePly
+from da3_utils import da3_to_multi_view_colmap, filter_prediction_edge_artifacts
 
 
 def extract_frame_number(filepath: Path) -> int:
@@ -197,8 +192,8 @@ def get_cholecseg8k_frames(clip: DictConfig, cfg: DictConfig):
     only_update_annotations = cfg.preprocessing.get("only_update_annotations", False)
 
     if not only_update_annotations:
-        out_rgb = clip_dir / "rgb"
-        out_rgb.mkdir(parents=True, exist_ok=True)
+        out_images = clip_dir / "images"
+        out_images.mkdir(parents=True, exist_ok=True)
 
         out_sem_masks = clip_dir / cfg.preprocessing.semantic_mask_subdir
         out_sem_masks.mkdir(parents=True, exist_ok=True)
@@ -274,7 +269,7 @@ def get_cholecseg8k_frames(clip: DictConfig, cfg: DictConfig):
                     instance_ids[component_mask] = instance_counter
                     instance_counter += 1
 
-            rgb_img_path = out_rgb / f"frame_{new_frame_id:06d}.png"
+            rgb_img_path = out_images / f"frame_{new_frame_id:06d}.png"
             Image.fromarray(rgb).save(rgb_img_path)
             np.save(out_sem_masks / f"frame_{new_frame_id:06d}.npy", class_ids)
             np.save(out_inst_masks / f"frame_{new_frame_id:06d}.npy", instance_ids)
@@ -302,10 +297,6 @@ def delete_unused_files(clip: DictConfig, cfg: DictConfig):
         (clip_dir / "images.txt").unlink()
     if (clip_dir / "points3D.txt").exists():
         (clip_dir / "points3D.txt").unlink()
-
-    # rgb dir becomes images dir
-    if (clip_dir / "rgb").exists():
-        shutil.rmtree(clip_dir / "rgb")
 
 
 def da3(clip: DictConfig, cfg: DictConfig):
@@ -409,22 +400,11 @@ def da3(clip: DictConfig, cfg: DictConfig):
     torch.cuda.empty_cache()
 
 
-def pc_ply_visualization(clip: DictConfig, cfg: DictConfig):
-    clip_dir = Path(cfg.preprocessed_root) / clip.name
-    bin_path = clip_dir / "sparse" / "0" / "points3D.bin"
-    out_path = clip_dir / cfg.preprocessing.pc_ply_visualization_filename
-    xyz, rgb, _ = read_points3D_binary(str(bin_path))
-    storePly(str(out_path), xyz, rgb)
-
-
 def process_clip(clip: DictConfig, cfg: DictConfig):
     get_cholecseg8k_frames(clip, cfg)
 
     if not cfg.preprocessing.only_update_annotations:
         da3(clip, cfg)
-
-        if cfg.preprocessing.pc_ply_visualization_filename:
-            pc_ply_visualization(clip, cfg)
 
         if not cfg.preprocessing.verbose_output:
             delete_unused_files(clip, cfg)

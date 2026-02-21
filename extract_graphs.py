@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn.neighbors import LocalOutlierFactor
-import open3d as o3d
+from utils.colmap_loader import read_points3D_binary
 
 from rerun_utils import (
     log_points_through_time,
@@ -279,11 +279,11 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     # sumbsample temporally
     points_through_time = points_through_time[::cfg.graph_extraction.timestep_stride]
 
-    # load colors from ply
-    ply_file = Path(cfg.preprocessed_root) / clip.name / "sparse" / "0" / "points3D.ply"
-    pcd = o3d.io.read_point_cloud(str(ply_file))
-    ply_colors = np.asarray(pcd.colors, dtype=np.float32)
-    logger.info(f"Loaded {ply_colors.shape[0]} colors from {ply_file}")
+    # load colors from COLMAP points3D.bin
+    points3d_bin_file = Path(cfg.preprocessed_root) / clip.name / "sparse" / "0" / "points3D.bin"
+    _, point_rgbs, _ = read_points3D_binary(points3d_bin_file)
+    ply_colors = point_rgbs.astype(np.float32) / 255.0
+    logger.info(f"Loaded {ply_colors.shape[0]} colors from {points3d_bin_file}")
     if points_through_time.shape[1] != ply_colors.shape[0]:
         logger.warning(
             f"number of colors ({ply_colors.shape[0]}) does not match number of gaussians ({points_through_time.shape[1]})"
