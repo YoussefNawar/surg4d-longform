@@ -103,8 +103,24 @@ def evaluate_temporal(
     pred_out_dir = Path(cfg.eval.temporal.output_dir)
     pred_out_dir.mkdir(parents=True, exist_ok=True)
     pred_out_file = pred_out_dir / f"{clip.name}.json"
+    # if file already exists, merge rather than overwrite entirely so that
+    # methods not executed this run are preserved. this makes it easier to
+    # iterate on individual strategies without rerunning all of them.
+    if pred_out_file.exists():
+        with pred_out_file.open("r") as f:
+            pred_out = json.load(f)
+        existing_methods = pred_out.get("methods", {})
+    else:
+        pred_out = {}
+        existing_methods = {}
+
+    # update with new predictions
+    existing_methods.update(preds_by_method)
+    pred_out["clip"] = str(clip.name)
+    pred_out["methods"] = existing_methods
+
     with pred_out_file.open("w") as f:
-        json.dump({"clip": str(clip.name), "methods": preds_by_method}, f, indent=2)
+        json.dump(pred_out, f, indent=2)
 
 
 def get_timestep_from_frame(frame: str, image_dir: Path) -> int:
@@ -190,8 +206,16 @@ def evaluate_spatial(
     out_dir = Path(cfg.eval.spatial.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions_file = out_dir / f"{clip.name}.json"
-    with open(predictions_file, "w") as f:
-        json.dump(all_results, f, indent=4)
+    # merge if existing predictions are present
+    if predictions_file.exists():
+        with predictions_file.open("r") as f:
+            pred_out = json.load(f)
+    else:
+        pred_out = {}
+    # simply replace any methods we just ran
+    pred_out.update(all_results)
+    with predictions_file.open("w") as f:
+        json.dump(pred_out, f, indent=4)
 
     # Optional: dump per-(query, layer) visualizations of top-k points on the frame
     if cfg.eval.spatial.dump_visualizations:
@@ -279,8 +303,19 @@ def evaluate_directional(
     pred_out_dir = Path(cfg.eval.directional.output_dir)
     pred_out_dir.mkdir(parents=True, exist_ok=True)
     pred_out_file = pred_out_dir / f"{clip.name}.json"
+    # merge with any existing predictions to keep methods not re-run
+    if pred_out_file.exists():
+        with pred_out_file.open("r") as f:
+            pred_out = json.load(f)
+        existing_methods = pred_out.get("methods", {})
+    else:
+        pred_out = {}
+        existing_methods = {}
+    existing_methods.update(preds_by_method)
+    pred_out["clip"] = str(clip.name)
+    pred_out["methods"] = existing_methods
     with pred_out_file.open("w") as f:
-        json.dump({"clip": str(clip.name), "methods": preds_by_method}, f, indent=2)
+        json.dump(pred_out, f, indent=2)
 
 
 @hydra.main(config_path="conf", config_name="config.yaml", version_base="1.3")

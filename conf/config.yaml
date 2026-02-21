@@ -8,12 +8,10 @@ defaults:
   - compute_metrics: default
   - _self_
   
-
-cholec80_root: data/cholec80
 cholecseg8k_root: data/cholecseg8k
-cholect50_root: data/cholect50
-preprocessed_root: data/preprocessed/refactor
-output_root: output/refactor
+
+preprocessed_root: data/preprocessed/clean
+output_root: output/clean
 
 config_dumps:
   # - ${output_root}/config.yaml

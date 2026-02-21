@@ -8,7 +8,6 @@ preprocess/log
 preprocess/preprocess_result
 .vscode
 .venv
-# pixi environments
 .pixi/*
 !.pixi/config.toml
 outputs/
