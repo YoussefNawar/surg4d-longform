@@ -120,6 +120,7 @@ def multiframe_queries(
     cfg: "DictConfig",
     use_semantic_labels: bool = False, # mock
     semantic_method_name: str = "", # mock
+    use_masks: bool = False,
 ) -> List[Dict]:
     """Run multiframe (video-only) temporal queries.
     
@@ -137,6 +138,14 @@ def multiframe_queries(
     """
     # Load graph to determine stride for frame sampling
     selected_frames = video_frames[::cfg.eval.annotation_stride]
+
+    if use_masks:
+        overlay_dir = (
+            Path(cfg.preprocessed_root)
+            / clip.name
+            / cfg.eval.paths.overlay_subdir
+        )
+        selected_frames = [overlay_dir / f"{frame_path.stem}.png" for frame_path in selected_frames]
     
     # Calculate effective FPS based on stride
     # Original video is at video_fps, but we sample every stride frames
@@ -146,17 +155,26 @@ def multiframe_queries(
     results = []
     for query_anno in annotations:
         query_id = query_anno["id"]
-        method_name = "multiframe"
+        method_name = "multiframe_masks" if use_masks else "multiframe"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Running [{query_id}] with method [{method_name}]")
         query_type = query_anno['type']
 
         # prompt
-        system_prompt = cfg.eval.temporal.multiframe_system_prompt
+        if use_masks:
+            system_prompt = cfg.eval.temporal.multiframe_masks_system_prompt
+        else:
+            system_prompt = cfg.eval.temporal.multiframe_system_prompt
         if query_type == 'pit':
-            template = cfg.eval.temporal.multiframe_pit_prompt_template
+            if use_masks:
+                template = cfg.eval.temporal.multiframe_masks_pit_prompt_template
+            else:
+                template = cfg.eval.temporal.multiframe_pit_prompt_template
         elif query_type == 'range':
-            template = cfg.eval.temporal.multiframe_action_duration_prompt_template
+            if use_masks:
+                template = cfg.eval.temporal.multiframe_masks_action_duration_prompt_template
+            else:
+                template = cfg.eval.temporal.multiframe_action_duration_prompt_template
         else:
             raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
         prompt = template.format(question=query_anno['query'])
@@ -338,7 +356,7 @@ def graph_agent_queries(
                 raise ValueError(f"Unsupported semantic method: {semantic_method_name}")
         elif query_type == 'range':
             if semantic_method_name == 'graph_agent_semantics_vision':
-                template = cfg.eval.temporal.graph_agent_semantics__vision_range_prompt_template
+                template = cfg.eval.temporal.graph_agent_semantics_vision_range_prompt_template
             elif semantic_method_name == 'graph_agent_semantics':
                 template = cfg.eval.temporal.graph_agent_semantics_range_prompt_template
             else:

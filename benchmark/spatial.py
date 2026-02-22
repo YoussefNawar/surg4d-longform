@@ -282,17 +282,25 @@ def frame_direct_feat_queries(
     clip: DictConfig,
     cfg: DictConfig,
     use_semantic_labels: bool = False,
+    use_masks: bool = False,
 ):
     """Run direct Qwen prompting on the frame to return a single pixel per query."""
-    images_dir = Path(preprocessed_root) / clip.name / images_subdir
+    if use_masks:
+        images_dir = Path(preprocessed_root) / clip.name / cfg.eval.paths.overlay_subdir
+    else:
+        images_dir = Path(preprocessed_root) / clip.name / images_subdir
 
-    system_prompt = cfg.eval.spatial.frame_direct_system_prompt
-    prompt_template = cfg.eval.spatial.frame_direct_prompt_template
+    if use_masks:
+        system_prompt = cfg.eval.spatial.frame_direct_masks_system_prompt
+        prompt_template = cfg.eval.spatial.frame_direct_masks_prompt_template
+    else:
+        system_prompt = cfg.eval.spatial.frame_direct_system_prompt
+        prompt_template = cfg.eval.spatial.frame_direct_prompt_template
 
     results = []
     for annotation in clip_gt:
         query_id = annotation["id"]
-        method_name = "frame_direct"
+        method_name = "frame_direct_masks" if use_masks else "frame_direct"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Running [{query_id}] with method [{method_name}]")
         # prompt

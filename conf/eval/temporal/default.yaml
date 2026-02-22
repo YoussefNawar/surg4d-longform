@@ -1,19 +1,13 @@
 methods:
   - multiframe
+  - multiframe_masks
   - graph_agent_semantics
   - graph_agent_semantics_vision
 output_dir: ${eval.output_dir}/temporal
 tool_viz_dir: ${eval.output_dir}/tool_viz/temporal # null to disable
 
 # multiframe
-multiframe_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - You have access to a video of the scene.
-
-  # Rules
-  - Think briefly, do not spend too much time.
-  - The questions are very specific, pay close attention to all of the questions' details.
+multiframe_system_prompt: ${eval.generic_system_prompts.multiframe}
 multiframe_pit_prompt_template: |
   {question}
 
@@ -21,6 +15,20 @@ multiframe_pit_prompt_template: |
   Example output (format only): ... {{"second": T}} ...
 
 multiframe_action_duration_prompt_template: |
+  {question}
+
+  Your final answer has to contain a list of time ranges in seconds as a JSON object. Do not refuse!
+  Example output (format only): ... {{"second_ranges": [[T_1, T_2], [T_3, T_4]]}} ...
+
+# multiframe with semantic mask overlays
+multiframe_masks_system_prompt: ${eval.generic_system_prompts.multiframe_masks}
+multiframe_masks_pit_prompt_template: |
+  {question}
+
+  Your final answer has to contain exactly one float second as a JSON object. Do not refuse!
+  Example output (format only): ... {{"second": T}} ...
+
+multiframe_masks_action_duration_prompt_template: |
   {question}
 
   Your final answer has to contain a list of time ranges in seconds as a JSON object. Do not refuse!
@@ -43,29 +51,7 @@ graph_agent_semantics_vision_tools:
     max_calls: null
   - name: show_scene_at_timestep
     max_calls: null
-graph_agent_semantics_vision_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - Your initial scene representation is a set of nodes from a single timestep.
-  - Use have access to tools to explore full scene.
-
-  # Scene representation
-  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
-  - The scene consists of 20 timesteps.
-  - The scene is reconstructed from a laparoscopic camera view.
-  - Coordinate system:
-    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
-    - laparoscopic camera looks in positive z direction
-    - the coordinate system is roughly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
-    - increase in x means movement to the right
-    - increase in y means movement to the bottom
-    - increase in z means movement away from the camera
-
-  # Rules
-  - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Think briefly, do not spend too much time on each turn.
-  - The questions are very specific, pay close attention to all of the questions' details.
-  - Reason via geometry first, then, in cases where geometry is not sufficient (does a grasper just touch something or grip it?, does a hook just cut something or apply electrical current?, etc.) look at video frames to check and refine your assumptions and answers.
+graph_agent_semantics_vision_system_prompt: ${eval.generic_system_prompts.graph_agent_semantics_vision}
 graph_agent_semantics_vision_pit_prompt_template: |
   {question}
 
@@ -73,7 +59,7 @@ graph_agent_semantics_vision_pit_prompt_template: |
 
   Your final answer has to contain exactly one integer timestep as a JSON object. Do not refuse!
   Example output (format only): ... {{"timestep": T}} ...
-graph_agent_semantics__vision_range_prompt_template: |
+graph_agent_semantics_vision_range_prompt_template: |
   {question}
 
   The graph has {num_frames} timesteps (t=0 to t={last_frame}).
@@ -96,28 +82,7 @@ graph_agent_semantics_tools:
     max_calls: null
   - name: relative_node_movement_through_time
     max_calls: null
-graph_agent_semantics_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - Your initial scene representation is a set of nodes from a single timestep.
-  - Use have access to tools to explore full scene.
-
-  # Scene representation
-  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
-  - The scene consists of 20 timesteps.
-  - The scene is reconstructed from a laparoscopic camera view.
-  - Coordinate system:
-    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
-    - laparoscopic camera looks in positive z direction
-    - the coordinate system is roughly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
-    - increase in x means movement to the right
-    - increase in y means movement to the bottom
-    - increase in z means movement away from the camera
-
-  # Rules
-  - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Think briefly, do not spend too much time on each turn.
-  - The questions are very specific, pay close attention to all of the questions' details.
+graph_agent_semantics_system_prompt: ${eval.generic_system_prompts.graph_agent_semantics}
 graph_agent_semantics_pit_prompt_template: |
   {question}
 

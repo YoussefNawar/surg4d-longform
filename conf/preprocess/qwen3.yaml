@@ -1,5 +1,6 @@
 semantic_mask_subdir: semantic_masks
 instance_mask_subdir: instance_masks
+overlay_subdir: color_masks
 image_subdir: images
 
 annotation_root: data/annotations

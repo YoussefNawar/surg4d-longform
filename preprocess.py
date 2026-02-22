@@ -9,7 +9,7 @@ import cv2
 import json
 import re
 
-from utils.cholec_utils import get_clip_seg8k, parse_cholecseg8k_instance_mask
+from utils.cholec_utils import get_clip_seg8k, seg8k_endo_watershed_to_class_ids
 
 
 def extract_frame_number(filepath: Path) -> int:
@@ -197,7 +197,10 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
         out_inst_masks = clip_dir / cfg.preprocess.instance_mask_subdir
         out_inst_masks.mkdir(parents=True, exist_ok=True)
 
-    frame_files, semantic_mask_files = get_clip_seg8k(
+        out_overlayed = clip_dir / cfg.preprocess.overlay_subdir
+        out_overlayed.mkdir(parents=True, exist_ok=True)
+
+    frame_files, semantic_mask_files, color_mask_files = get_clip_seg8k(
         seg8k_root=Path(cfg.cholecseg8k_root),
         seg8k_video_id=clip.video_id,
         first_frame=clip.first_frame,
@@ -207,7 +210,7 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
 
     # estimate crops to remove black borders
     top, bottom, left, right = estimate_crop_box(
-        parse_cholecseg8k_instance_mask(Image.open(semantic_mask_files[0]))
+        seg8k_endo_watershed_to_class_ids(Image.open(semantic_mask_files[0]))
     )
 
     # translate spatial labels to new coordinates
@@ -228,20 +231,23 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
             shutil.rmtree(viz_dir)
         viz_dir.mkdir(parents=True)
 
-    for new_frame_id, (frame_file, semantic_mask_file) in enumerate(
-        zip(frame_files, semantic_mask_files)
+    for new_frame_id, (frame_file, semantic_mask_file, color_mask_file) in enumerate(
+        zip(frame_files, semantic_mask_files, color_mask_files)
     ):
         rgb = Image.open(frame_file)
-        instance_mask = Image.open(semantic_mask_file)
+        semantic_mask = Image.open(semantic_mask_file)
+        color_mask = Image.open(color_mask_file)
 
-        class_ids = parse_cholecseg8k_instance_mask(instance_mask)
+        class_ids = seg8k_endo_watershed_to_class_ids(semantic_mask)
 
         rgb = np.asarray(rgb)[top:bottom, left:right]
         class_ids = class_ids[top:bottom, left:right]
+        color_mask = np.asarray(color_mask)[top:bottom, left:right]
         rgb = center_crop_divisible(
             rgb, cfg.preprocess.frames_divisor, skip_last_dim=True
-        )  # required for qwen encoder
+        )
         class_ids = center_crop_divisible(class_ids, cfg.preprocess.frames_divisor)
+        color_mask = center_crop_divisible(color_mask, cfg.preprocess.frames_divisor, skip_last_dim=True)
 
         if not only_update_annotations:
             # Generate instance masks from semantic masks using connected components
@@ -266,10 +272,13 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
                     instance_ids[component_mask] = instance_counter
                     instance_counter += 1
 
-            rgb_img_path = out_images / f"frame_{new_frame_id:06d}.png"
-            Image.fromarray(rgb).save(rgb_img_path)
             np.save(out_sem_masks / f"frame_{new_frame_id:06d}.npy", class_ids)
             np.save(out_inst_masks / f"frame_{new_frame_id:06d}.npy", instance_ids)
+            rgb_img = Image.fromarray(rgb)
+            rgb_img.save(out_images / f"frame_{new_frame_id:06d}.png")
+            overlayed_img = Image.blend(rgb_img, Image.fromarray(color_mask), alpha=0.5)
+            overlayed_img.save(out_overlayed / f"frame_{new_frame_id:06d}.png")
+
 
         # Optional visualization of labels on preprocessed frames
         if (

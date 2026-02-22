@@ -41,17 +41,27 @@ def multiframe_directional_queries(
     cfg: DictConfig,
     use_semantic_labels: bool = False, # mock
     semantic_method_name: str = "", # mock
+    use_masks: bool = False,
 ) -> List[Dict[str, Any]]:
     sampled_frames = video_frames[::cfg.eval.annotation_stride]
     effective_fps = cfg.eval.video_fps / cfg.eval.annotation_stride
-
-    system_prompt = cfg.eval.directional.multiframe_system_prompt
-    prompt_template = cfg.eval.directional.multiframe_prompt_template
+    if use_masks:
+        system_prompt = cfg.eval.directional.multiframe_masks_system_prompt
+        prompt_template = cfg.eval.directional.multiframe_masks_prompt_template
+        overlay_dir = (
+            Path(cfg.preprocessed_root)
+            / clip.name
+            / cfg.eval.paths.overlay_subdir
+        )
+        sampled_frames = [overlay_dir / f"{frame_path.stem}.png" for frame_path in sampled_frames]
+    else:
+        system_prompt = cfg.eval.directional.multiframe_system_prompt
+        prompt_template = cfg.eval.directional.multiframe_prompt_template
 
     results = []
     for query_anno in annotations:
         query_id = query_anno["id"]
-        method_name = "multiframe"
+        method_name = "multiframe_masks" if use_masks else "multiframe"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Running [{query_id}] with method [{method_name}]")
         query = query_anno["query"]

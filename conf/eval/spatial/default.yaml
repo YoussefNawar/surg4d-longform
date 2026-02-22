@@ -1,5 +1,6 @@
 methods:
   - frame_direct
+  - frame_direct_masks
   - graph_agent_semantics
   - graph_agent_semantics_vision
 geometry_npz_relpath: ${extract_geometry.da3_subdir}/results.npz
@@ -10,15 +11,16 @@ visualizations_dir: ${eval.output_dir}/spatial_viz
 tool_viz_dir: ${eval.output_dir}/tool_viz/spatial
 
 # frame direct
-frame_direct_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - You have access to an image of the scene.
-
-  # Rules
-  - Think briefly, do not spend too much time.
-  - The questions are very specific, pay close attention to all of the questions' details.
+frame_direct_system_prompt: ${eval.generic_system_prompts.frame_direct}
 frame_direct_prompt_template: |
+  {question}
+
+  Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
+  Example output (format only): ... {{"x": X, "y": Y}} ...
+
+# frame direct with semantic mask overlays
+frame_direct_masks_system_prompt: ${eval.generic_system_prompts.frame_direct_masks}
+frame_direct_masks_prompt_template: |
   {question}
 
   Your final answer has to contain exactly one 2D point in the image's pixel coordinate system as a JSON object. Do not refuse!
@@ -41,29 +43,7 @@ graph_agent_semantics_vision_tools:
     max_calls: null
   - name: show_scene_at_timestep
     max_calls: null
-graph_agent_semantics_vision_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - Your initial scene representation is a set of nodes from a single timestep.
-  - Use have access to tools to explore full scene.
-
-  # Scene representation
-  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
-  - The scene consists of 20 timesteps.
-  - The scene is reconstructed from a laparoscopic camera view.
-  - Coordinate system:
-    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
-    - laparoscopic camera looks in positive z direction
-    - the coordinate system is roughly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
-    - increase in x means movement to the right
-    - increase in y means movement to the bottom
-    - increase in z means movement away from the camera
-
-  # Rules
-  - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Think briefly, do not spend too much time on each turn.
-  - The questions are very specific, pay close attention to all of the questions' details.
-  - Reason via geometry first, then, in cases where geometry is not sufficient (does a grasper just touch something or grip it?, does a hook just cut something or apply electrical current?, etc.) look at video frames to check and refine your assumptions and answers.
+graph_agent_semantics_vision_system_prompt: ${eval.generic_system_prompts.graph_agent_semantics_vision}
 graph_agent_semantics_vision_prompt_template: |
   {question}
 
@@ -85,28 +65,7 @@ graph_agent_semantics_tools:
     max_calls: null
   - name: relative_node_movement_through_time
     max_calls: null
-graph_agent_semantics_system_prompt: |
-  # Task
-  - You are an expert visceral surgeon analyzing a cholecystectomy scene.
-  - Your initial scene representation is a set of nodes from a single timestep.
-  - Use have access to tools to explore full scene.
-
-  # Scene representation
-  - The scene represents a brief (2-3 seconds) excerpt from a laparoscopic cholecystectomy.
-  - The scene consists of 20 timesteps.
-  - The scene is reconstructed from a laparoscopic camera view.
-  - Coordinate system:
-    - relative to the laparoscopic camera, which might be inserted into the abdomen from any direction
-    - laparoscopic camera looks in positive z direction
-    - the coordinate system is roughly metric in cm (although not perfectly so, distances tend to be overestimated a bit)
-    - increase in x means movement to the right
-    - increase in y means movement to the bottom
-    - increase in z means movement away from the camera
-
-  # Rules
-  - Strictly respect tool call limits. (Initially given by user prompt, updated by tool responses.)
-  - Think briefly, do not spend too much time on each turn.
-  - The questions are very specific, pay close attention to all of the questions' details.
+graph_agent_semantics_system_prompt: ${eval.generic_system_prompts.graph_agent_semantics}
 graph_agent_semantics_prompt_template: |
   {question}
 

@@ -38,6 +38,9 @@ def get_clip_seg8k(
         int(i.stem.split("_")[1]): i
         for i in clip_dir.glob("frame_*_endo_watershed_mask.png")
     }
+    all_color_masks = {
+        int(i.stem.split("_")[1]): i
+        for i in clip_dir.glob("frame_*_endo_color_mask.png")}
 
     if last_frame - 1 > max(all_frames.keys()):
         raise FileNotFoundError(
@@ -48,51 +51,14 @@ def get_clip_seg8k(
     semantic_mask_files = [
         all_semantic_masks[i] for i in range(first_frame, last_frame, frame_stride)
     ]
+    color_mask_files = [
+        all_color_masks[i] for i in range(first_frame, last_frame, frame_stride)
+    ]
 
-    return frame_files, semantic_mask_files
-
-
-def get_clip_t50(
-    t50_root: Path,
-    t50_video_id: int,
-    first_frame: int,
-    last_frame: int,
-    frame_stride: int,
-):
-    """Get clip from CholecT50 dataset
-
-    Args:
-        t50_root (Path): Root directory of CholecT50 dataset
-        t50_video_id (int): Video ID (constant over cholec80 derivatives)
-        first_frame (int): First frame of the clip (inclusive)
-        last_frame (int): Last frame of the clip (exclusive)
-        frame_stride (int): Frame stride
-
-    Returns:
-        _type_: _description_
-    """
-    vid_dir = t50_root / "videos" / f"VID{t50_video_id:02d}"
-    if not vid_dir.exists():
-        raise FileNotFoundError(f"Video directory not found: {vid_dir}")
-
-    all_frames = {int(i.stem): i for i in vid_dir.glob("*.png")}
-
-    if first_frame < min(all_frames.keys()):
-        raise FileNotFoundError(
-            f"First frame {first_frame} not found in video directory: {vid_dir}"
-        )
-
-    if last_frame - 1 > max(all_frames.keys()):
-        raise FileNotFoundError(
-            f"Last frame {last_frame - 1} not found in video directory: {vid_dir}"
-        )
-
-    frame_files = [all_frames[i] for i in range(first_frame, last_frame, frame_stride)]
-
-    return frame_files
+    return frame_files, semantic_mask_files, color_mask_files
 
 
-def parse_cholecseg8k_instance_mask(instance_mask: Image.Image):
+def seg8k_endo_watershed_to_class_ids(endo_watershed_mask: Image.Image):
     """convert instance watershed mask to zero indexed class ids numpy array"""
     rgb_to_class = {  # taken from https://www.kaggle.com/datasets/newslab/cholecseg8k
         255: {  # they are not defined but present, just map to background as well
@@ -152,18 +118,16 @@ def parse_cholecseg8k_instance_mask(instance_mask: Image.Image):
             "class_name": "Liver Ligament",
         },
     }
-    arr = np.asarray(instance_mask)
+    arr = np.asarray(endo_watershed_mask)
     single_channel = arr[:, :, 0]  # the rgb vals just repeat for each id mapping
-    class_ids = np.empty(shape=single_channel.shape, dtype=np.uint8)
-    test = np.zeros(shape=single_channel.shape, dtype=np.uint8)
+    class_ids = np.zeros(shape=single_channel.shape, dtype=np.uint8)
     for rgb_val, class_info in rgb_to_class.items():
         class_ids[single_channel == rgb_val] = class_info["class_id"]
-        test[single_channel == rgb_val] = 1
 
     return class_ids
 
 
-def get_semantic_label_from_class_id(class_id: int) -> str:
+def seg8k_class_id_to_class_name(class_id: int) -> str:
     """Get semantic label string from class ID.
     
     Args:

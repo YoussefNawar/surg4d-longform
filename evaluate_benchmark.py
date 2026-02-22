@@ -54,6 +54,7 @@ def evaluate_temporal(
     # Methods using the normal model
     method_map = {
         "multiframe": multiframe_queries,
+        "multiframe_masks": multiframe_queries,
         "graph_agent_semantics": graph_agent_queries,
         "graph_agent_semantics_vision": graph_agent_queries,
     }
@@ -66,16 +67,22 @@ def evaluate_temporal(
             continue
         
         strategy_fn = method_map[method_name]
+        kwargs = {
+            "model": model,
+            "processor": processor,
+            "video_frames": video_frames,
+            "graph_path": graph_path,
+            "annotations": annotations,
+            "clip": clip,
+            "cfg": cfg,
+            "use_semantic_labels": method_name in {"graph_agent_semantics", "graph_agent_semantics_vision"},
+            "semantic_method_name": method_name,
+        }
+        if method_name in {"multiframe", "multiframe_masks"}:
+            kwargs["use_masks"] = method_name == "multiframe_masks"
+
         results = strategy_fn(
-            model=model,
-            processor=processor,
-            video_frames=video_frames,
-            graph_path=graph_path,
-            annotations=annotations,
-            clip=clip,
-            cfg=cfg,
-            use_semantic_labels=method_name in {"graph_agent_semantics", "graph_agent_semantics_vision"},
-            semantic_method_name=method_name,
+            **kwargs,
         )
         all_results[method_name] = results
         
@@ -177,6 +184,19 @@ def evaluate_spatial(
             clip_gt=gt_data,
             clip=clip,
             cfg=cfg,
+            use_masks=False,
+        )
+
+    if "frame_direct_masks" in methods_to_run:
+        all_results["frame_direct_masks"] = frame_direct_feat_queries(
+            model=model,
+            processor=processor,
+            preprocessed_root=Path(cfg.preprocessed_root),
+            images_subdir=cfg.eval.paths.images_subdir,
+            clip_gt=gt_data,
+            clip=clip,
+            cfg=cfg,
+            use_masks=True,
         )
 
     if "graph_agent_semantics" in methods_to_run:
@@ -221,6 +241,7 @@ def evaluate_spatial(
     if cfg.eval.spatial.dump_visualizations:
         viz_method_names = {
             "frame_direct": "frame_direct",
+            "frame_direct_masks": "frame_direct_masks",
             "graph_agent_semantics": "graph_agent_semantics",
             "graph_agent_semantics_vision": "graph_agent_semantics_vision",
         }
@@ -258,6 +279,7 @@ def evaluate_directional(
 
     method_map = {
         "multiframe": multiframe_directional_queries,
+        "multiframe_masks": multiframe_directional_queries,
         "graph_agent_semantics": graph_agent_directional_queries,
         "graph_agent_semantics_vision": graph_agent_directional_queries,
     }
@@ -268,16 +290,22 @@ def evaluate_directional(
             continue
 
         strategy_fn = method_map[method_name]
+        kwargs = {
+            "model": model,
+            "processor": processor,
+            "video_frames": video_frames,
+            "graph_path": graph_path,
+            "annotations": annotations,
+            "clip": clip,
+            "cfg": cfg,
+            "use_semantic_labels": method_name in {"graph_agent_semantics", "graph_agent_semantics_vision"},
+            "semantic_method_name": method_name,
+        }
+        if method_name in {"multiframe", "multiframe_masks"}:
+            kwargs["use_masks"] = method_name == "multiframe_masks"
+
         results = strategy_fn(
-            model=model,
-            processor=processor,
-            video_frames=video_frames,
-            graph_path=graph_path,
-            annotations=annotations,
-            clip=clip,
-            cfg=cfg,
-            use_semantic_labels=method_name in {"graph_agent_semantics", "graph_agent_semantics_vision"},
-            semantic_method_name=method_name,
+            **kwargs,
         )
         all_results[method_name] = results
 

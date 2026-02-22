@@ -21,7 +21,7 @@ from utils.cotracker_utils import (
     compute_gaussian_control_point_associations,
 )
 from utils.cotracker_interpolation import precompute_control_point_positions
-from utils.cholec_utils import get_semantic_label_from_class_id
+from utils.cholec_utils import seg8k_class_id_to_class_name
 
 
 def extract_frame_number(filepath: Path) -> int:
@@ -456,7 +456,7 @@ def compute_semantic_labels_for_merged_instances(
             )
         
         semantic_id = int(unique_semantic_ids[0])
-        semantic_label = get_semantic_label_from_class_id(semantic_id)
+        semantic_label = seg8k_class_id_to_class_name(semantic_id)
         semantic_labels[int(merged_inst_id)] = semantic_label
         
         logger.debug(f"Merged instance {merged_inst_id} -> semantic class {semantic_id} ({semantic_label})")

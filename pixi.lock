@@ -196,7 +196,6 @@ packages:
   - openmp_impl <0.0a0
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 28948
   timestamp: 1770939786096
 - conda: https://conda.anaconda.org/conda-forge/linux-64/alsa-lib-1.2.15.3-hb03c661_0.conda
@@ -207,7 +206,6 @@ packages:
   - libgcc >=14
   license: LGPL-2.1-or-later
   license_family: GPL
-  purls: []
   size: 584660
   timestamp: 1768327524772
 - conda: https://conda.anaconda.org/conda-forge/linux-64/attr-2.5.2-h39aace5_0.conda
@@ -218,7 +216,6 @@ packages:
   - libgcc >=13
   license: GPL-2.0-or-later
   license_family: GPL
-  purls: []
   size: 68072
   timestamp: 1756738968573
 - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils-2.45.1-default_h4852527_101.conda
@@ -228,7 +225,6 @@ packages:
   - binutils_impl_linux-64 >=2.45.1,<2.45.2.0a0
   license: GPL-3.0-only
   license_family: GPL
-  purls: []
   size: 35128
   timestamp: 1770267175160
 - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils_impl_linux-64-2.45.1-default_hfdba357_101.conda
@@ -240,7 +236,6 @@ packages:
   - zstd >=1.5.7,<1.6.0a0
   license: GPL-3.0-only
   license_family: GPL
-  purls: []
   size: 3744895
   timestamp: 1770267152681
 - conda: https://conda.anaconda.org/conda-forge/linux-64/binutils_linux-64-2.45.1-default_h4852527_101.conda
@@ -250,7 +245,6 @@ packages:
   - binutils_impl_linux-64 2.45.1 default_hfdba357_101
   license: GPL-3.0-only
   license_family: GPL
-  purls: []
   size: 36060
   timestamp: 1770267177798
 - conda: https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_9.conda
@@ -261,7 +255,6 @@ packages:
   - libgcc >=14
   license: bzip2-1.0.6
   license_family: BSD
-  purls: []
   size: 260182
   timestamp: 1771350215188
 - conda: https://conda.anaconda.org/conda-forge/linux-64/c-compiler-1.11.0-h4d9bdce_0.conda
@@ -273,7 +266,6 @@ packages:
   - gcc_linux-64 14.*
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 6693
   timestamp: 1753098721814
 - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.1.4-hbd8a1cb_0.conda
@@ -282,7 +274,6 @@ packages:
   depends:
   - __unix
   license: ISC
-  purls: []
   size: 146519
   timestamp: 1767500828366
 - conda: https://conda.anaconda.org/conda-forge/linux-64/conda-gcc-specs-14.3.0-he8ccf15_18.conda
@@ -292,7 +283,6 @@ packages:
   - gcc_impl_linux-64 >=14.3.0,<14.3.1.0a0
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 31705
   timestamp: 1771378159534
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-cccl_linux-64-12.8.90-ha770c72_1.conda
@@ -301,7 +291,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 1064204
   timestamp: 1741373535593
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-command-line-tools-12.8.1-ha770c72_0.conda
@@ -315,7 +304,6 @@ packages:
   - cuda-nvtx 12.8.90.*
   - cuda-sanitizer-api 12.8.93.*
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 20137
   timestamp: 1741381157290
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-compiler-12.8.1-hbad6d8a_0.conda
@@ -330,7 +318,6 @@ packages:
   - cuda-nvprune 12.8.90.*
   - cxx-compiler
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 20288
   timestamp: 1741381235177
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-crt-dev_linux-64-12.8.93-ha770c72_3.conda
@@ -339,7 +326,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 93330
   timestamp: 1744159239919
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-crt-tools-12.8.93-ha770c72_3.conda
@@ -348,7 +334,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 28081
   timestamp: 1744159249576
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cudart-12.8.90-h5888daf_1.conda
@@ -361,7 +346,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 22751
   timestamp: 1741374679128
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cudart-dev-12.8.90-h5888daf_1.conda
@@ -376,7 +360,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 23184
   timestamp: 1741374710131
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-cudart-dev_linux-64-12.8.90-h3f2d84a_1.conda
@@ -388,7 +371,6 @@ packages:
   - cuda-cudart_linux-64
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 385560
   timestamp: 1741374687362
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cudart-static-12.8.90-h5888daf_1.conda
@@ -401,7 +383,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 22779
   timestamp: 1741374696039
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-cudart-static_linux-64-12.8.90-h3f2d84a_1.conda
@@ -410,7 +391,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 987272
   timestamp: 1741374656668
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-cudart_linux-64-12.8.90-h3f2d84a_1.conda
@@ -419,7 +399,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 192766
   timestamp: 1741374664938
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cuobjdump-12.8.90-hbd13f7d_1.conda
@@ -432,7 +411,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 232426
   timestamp: 1742416137141
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cupti-12.8.90-h5888daf_1.conda
@@ -444,7 +422,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 1848503
   timestamp: 1743629512155
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cupti-dev-12.8.90-h5888daf_1.conda
@@ -459,7 +436,6 @@ packages:
   constrains:
   - cuda-cupti-static >=12.8.90
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 4219417
   timestamp: 1743629573682
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-cuxxfilt-12.8.90-hbd13f7d_1.conda
@@ -471,7 +447,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 216285
   timestamp: 1742416201527
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-driver-dev-12.8.90-h5888daf_1.conda
@@ -484,7 +459,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 22553
   timestamp: 1741374703046
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-driver-dev_linux-64-12.8.90-h3f2d84a_1.conda
@@ -493,7 +467,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 36985
   timestamp: 1741374672216
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-gdb-12.8.90-ha677faa_1.conda
@@ -506,7 +479,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 360547
   timestamp: 1743626104302
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-libraries-12.8.1-ha770c72_0.conda
@@ -527,7 +499,6 @@ packages:
   - libnvjitlink 12.8.93.*
   - libnvjpeg 12.3.5.92.*
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 20178
   timestamp: 1741386840152
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-libraries-dev-12.8.1-ha770c72_0.conda
@@ -551,7 +522,6 @@ packages:
   - libnvjitlink-dev 12.8.93.*
   - libnvjpeg-dev 12.3.5.92.*
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 20231
   timestamp: 1741386851906
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nsight-12.8.90-h7938cbb_1.conda
@@ -560,7 +530,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 118690051
   timestamp: 1742488231869
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvcc-12.8.93-hcdd1206_2.conda
@@ -571,7 +540,6 @@ packages:
   - gcc_linux-64
   - gxx_linux-64
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 24875
   timestamp: 1746136037405
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-nvcc-dev_linux-64-12.8.93-he91c749_3.conda
@@ -585,7 +553,6 @@ packages:
   constrains:
   - gcc_impl_linux-64 >=6,<15.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 13298256
   timestamp: 1744159454859
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvcc-impl-12.8.93-h85509e4_3.conda
@@ -601,7 +568,6 @@ packages:
   constrains:
   - gcc_impl_linux-64 >=6,<15.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 26416
   timestamp: 1744159505703
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvcc-tools-12.8.93-he02047a_3.conda
@@ -617,7 +583,6 @@ packages:
   constrains:
   - gcc_impl_linux-64 >=6,<15.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 25644307
   timestamp: 1744159388339
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvcc_linux-64-12.8.93-he0b4e1d_2.conda
@@ -632,7 +597,6 @@ packages:
   - cuda-nvcc-tools 12.8.93.*
   - sysroot_linux-64 >=2.17,<3.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 26846
   timestamp: 1746136036842
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvdisasm-12.8.90-hbd13f7d_1.conda
@@ -644,7 +608,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 5124390
   timestamp: 1742414503225
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvml-dev-12.8.90-hbd13f7d_1.conda
@@ -656,7 +619,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 138296
   timestamp: 1743814660851
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvprof-12.8.90-hcf8d014_1.conda
@@ -669,7 +631,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 2629561
   timestamp: 1743625848940
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvprune-12.8.90-hbd13f7d_1.conda
@@ -681,7 +642,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 69952
   timestamp: 1742487641731
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvrtc-12.8.93-h5888daf_1.conda
@@ -693,7 +653,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 66214407
   timestamp: 1742405328961
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvrtc-dev-12.8.93-h5888daf_1.conda
@@ -708,7 +667,6 @@ packages:
   constrains:
   - cuda-nvrtc-static >=12.8.93
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 35219
   timestamp: 1742405606719
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvtx-12.8.90-h5888daf_1.conda
@@ -720,7 +678,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 32175
   timestamp: 1743625825363
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-nvvm-dev_linux-64-12.8.93-ha770c72_3.conda
@@ -729,7 +686,6 @@ packages:
   depends:
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 26128
   timestamp: 1744159257892
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvvm-impl-12.8.93-he02047a_3.conda
@@ -741,7 +697,6 @@ packages:
   - libgcc >=12
   - libstdcxx >=12
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 21755778
   timestamp: 1744159278467
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvvm-tools-12.8.93-he02047a_3.conda
@@ -753,7 +708,6 @@ packages:
   - libgcc >=12
   - libstdcxx >=12
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 24620959
   timestamp: 1744159329485
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-nvvp-12.8.93-hbd13f7d_1.conda
@@ -767,7 +721,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 117841961
   timestamp: 1742487679508
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-opencl-12.8.90-h5888daf_1.conda
@@ -780,7 +733,6 @@ packages:
   - libstdcxx >=13
   - ocl-icd >=2.3.2,<3.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 30675
   timestamp: 1743624874961
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-opencl-dev-12.8.90-h5888daf_1.conda
@@ -793,7 +745,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 97805
   timestamp: 1743624882012
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-profiler-api-12.8.90-h7938cbb_1.conda
@@ -803,7 +754,6 @@ packages:
   - cuda-cudart-dev
   - cuda-version >=12.8,<12.9.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 23418
   timestamp: 1742422697955
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-sanitizer-api-12.8.93-hbd13f7d_1.conda
@@ -815,7 +765,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 9627766
   timestamp: 1742488609296
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-toolkit-12.8.1-ha804496_0.conda
@@ -829,7 +778,6 @@ packages:
   - cuda-nvml-dev 12.8.90.*
   - cuda-tools 12.8.1.*
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 20115
   timestamp: 1741401965713
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-tools-12.8.1-ha770c72_0.conda
@@ -840,7 +788,6 @@ packages:
   - cuda-visual-tools 12.8.1.*
   - gds-tools 1.13.1.3.*
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 19967
   timestamp: 1741395238183
 - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-version-12.8-h5d125a7_3.conda
@@ -850,7 +797,6 @@ packages:
   - cudatoolkit 12.8|12.8.*
   - __cuda >=12
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 21086
   timestamp: 1737663758355
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cuda-visual-tools-12.8.1-ha770c72_0.conda
@@ -863,7 +809,6 @@ packages:
   - cuda-nvvp 12.8.93.*
   - nsight-compute 2025.1.1.2.*
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 20019
   timestamp: 1741391257840
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cxx-compiler-1.11.0-hfcd1e18_0.conda
@@ -875,7 +820,6 @@ packages:
   - gxx_linux-64 14.*
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 6635
   timestamp: 1753098722177
 - conda: https://conda.anaconda.org/conda-forge/linux-64/dbus-1.16.2-h3c4dab8_0.conda
@@ -891,7 +835,6 @@ packages:
   - libglib >=2.84.2,<3.0a0
   license: GPL-2.0-or-later
   license_family: GPL
-  purls: []
   size: 437860
   timestamp: 1747855126005
 - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-dejavu-sans-mono-2.37-hab24e00_0.tar.bz2
@@ -899,7 +842,6 @@ packages:
   md5: 0c96522c6bdaed4b1566d11387caaf45
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 397370
   timestamp: 1566932522327
 - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-inconsolata-3.000-h77eed37_0.tar.bz2
@@ -907,7 +849,6 @@ packages:
   md5: 34893075a5c9e55cdafac56607368fc6
   license: OFL-1.1
   license_family: Other
-  purls: []
   size: 96530
   timestamp: 1620479909603
 - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-source-code-pro-2.038-h77eed37_0.tar.bz2
@@ -915,7 +856,6 @@ packages:
   md5: 4d59c254e01d9cde7957100457e2d5fb
   license: OFL-1.1
   license_family: Other
-  purls: []
   size: 700814
   timestamp: 1620479612257
 - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-ubuntu-0.83-h77eed37_3.conda
@@ -923,7 +863,6 @@ packages:
   md5: 49023d73832ef61042f6a237cb2687e7
   license: LicenseRef-Ubuntu-Font-Licence-Version-1.0
   license_family: Other
-  purls: []
   size: 1620504
   timestamp: 1727511233259
 - conda: https://conda.anaconda.org/conda-forge/linux-64/fontconfig-2.17.1-h27c8c51_0.conda
@@ -939,7 +878,6 @@ packages:
   - libzlib >=1.3.1,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 270705
   timestamp: 1771382710863
 - conda: https://conda.anaconda.org/conda-forge/noarch/fonts-conda-ecosystem-1-0.tar.bz2
@@ -949,7 +887,6 @@ packages:
   - fonts-conda-forge
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 3667
   timestamp: 1566974674465
 - conda: https://conda.anaconda.org/conda-forge/noarch/fonts-conda-forge-1-hc364b38_1.conda
@@ -962,7 +899,6 @@ packages:
   - font-ttf-source-code-pro
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 4059
   timestamp: 1762351264405
 - conda: https://conda.anaconda.org/conda-forge/linux-64/freetype-2.14.1-ha770c72_0.conda
@@ -972,7 +908,6 @@ packages:
   - libfreetype 2.14.1 ha770c72_0
   - libfreetype6 2.14.1 h73754d4_0
   license: GPL-2.0-only OR FTL
-  purls: []
   size: 173114
   timestamp: 1757945422243
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc-14.3.0-h0dff253_18.conda
@@ -983,7 +918,6 @@ packages:
   - gcc_impl_linux-64 14.3.0 hbdf3cc3_18
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 29506
   timestamp: 1771378321585
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_impl_linux-64-14.3.0-hbdf3cc3_18.conda
@@ -1000,7 +934,6 @@ packages:
   - sysroot_linux-64
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 76302378
   timestamp: 1771378056505
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gcc_linux-64-14.3.0-h298d278_21.conda
@@ -1012,7 +945,6 @@ packages:
   - sysroot_linux-64
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 28946
   timestamp: 1770908213807
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gds-tools-1.13.1.3-h5888daf_1.conda
@@ -1026,7 +958,6 @@ packages:
   - libnuma >=2.0.18,<3.0a0
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 39630386
   timestamp: 1743625034421
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gmp-6.3.0-hac33072_2.conda
@@ -1036,7 +967,6 @@ packages:
   - libgcc-ng >=12
   - libstdcxx-ng >=12
   license: GPL-2.0-or-later OR LGPL-3.0-or-later
-  purls: []
   size: 460055
   timestamp: 1718980856608
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx-14.3.0-h76987e4_18.conda
@@ -1047,7 +977,6 @@ packages:
   - gxx_impl_linux-64 14.3.0 h2185e75_18
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 28883
   timestamp: 1771378355605
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx_impl_linux-64-14.3.0-h2185e75_18.conda
@@ -1060,7 +989,6 @@ packages:
   - tzdata
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 14566100
   timestamp: 1771378271421
 - conda: https://conda.anaconda.org/conda-forge/linux-64/gxx_linux-64-14.3.0-he467f4b_21.conda
@@ -1073,7 +1001,6 @@ packages:
   - sysroot_linux-64
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 27503
   timestamp: 1770908213813
 - conda: https://conda.anaconda.org/conda-forge/linux-64/icu-78.2-h33c6efd_0.conda
@@ -1085,7 +1012,6 @@ packages:
   - libstdcxx >=14
   license: MIT
   license_family: MIT
-  purls: []
   size: 12728445
   timestamp: 1767969922681
 - conda: https://conda.anaconda.org/conda-forge/noarch/kernel-headers_linux-64-4.18.0-he073ed8_9.conda
@@ -1095,7 +1021,6 @@ packages:
   - sysroot_linux-64 ==2.28
   license: LGPL-2.0-or-later AND LGPL-2.0-or-later WITH exceptions AND GPL-2.0-or-later
   license_family: GPL
-  purls: []
   size: 1278712
   timestamp: 1765578681495
 - conda: https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.3-hb9d3cd8_0.conda
@@ -1105,7 +1030,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libgcc >=13
   license: LGPL-2.1-or-later
-  purls: []
   size: 134088
   timestamp: 1754905959823
 - conda: https://conda.anaconda.org/conda-forge/linux-64/krb5-1.21.3-h659f571_0.conda
@@ -1120,7 +1044,6 @@ packages:
   - openssl >=3.3.1,<4.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 1370023
   timestamp: 1719463201255
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.45.1-default_hbd61a6d_101.conda
@@ -1133,7 +1056,6 @@ packages:
   - binutils_impl_linux-64 2.45.1
   license: GPL-3.0-only
   license_family: GPL
-  purls: []
   size: 725507
   timestamp: 1770267139900
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcap-2.77-h3ff7636_0.conda
@@ -1145,7 +1067,6 @@ packages:
   - libgcc >=14
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 121429
   timestamp: 1762349484074
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcublas-12.8.4.1-h9ab20c4_1.conda
@@ -1158,7 +1079,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 471593172
   timestamp: 1742405543791
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcublas-dev-12.8.4.1-h9ab20c4_1.conda
@@ -1175,7 +1095,6 @@ packages:
   constrains:
   - libcublas-static >=12.8.4.1
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 91388
   timestamp: 1742406432538
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcufft-11.3.3.83-h5888daf_1.conda
@@ -1187,7 +1106,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 154743307
   timestamp: 1742415975122
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcufft-dev-11.3.3.83-h5888daf_1.conda
@@ -1202,7 +1120,6 @@ packages:
   constrains:
   - libcufft-static >=11.3.3.83
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 33996
   timestamp: 1742416361653
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcufile-1.13.1.3-h628e99a_1.conda
@@ -1215,7 +1132,6 @@ packages:
   - libstdcxx >=13
   - rdma-core >=55.0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 960749
   timestamp: 1743624986191
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcufile-dev-1.13.1.3-h5888daf_1.conda
@@ -1230,7 +1146,6 @@ packages:
   constrains:
   - libcufile-static >=1.13.1.3
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 35023
   timestamp: 1743625021471
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcurand-10.3.9.90-h9ab20c4_1.conda
@@ -1242,7 +1157,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 45729190
   timestamp: 1742487698497
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcurand-dev-10.3.9.90-h9ab20c4_1.conda
@@ -1257,7 +1171,6 @@ packages:
   constrains:
   - libcurand-static >=10.3.9.90
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 246729
   timestamp: 1742487805723
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcusolver-11.7.3.90-h9ab20c4_1.conda
@@ -1272,7 +1185,6 @@ packages:
   - libnvjitlink >=12.8.93,<13.0.0a0
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 164375128
   timestamp: 1742415308752
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcusolver-dev-11.7.3.90-h9ab20c4_1.conda
@@ -1287,7 +1199,6 @@ packages:
   constrains:
   - libcusolver-static >=11.7.3.90
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 61032
   timestamp: 1742415570459
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcusparse-12.5.8.93-h5888daf_1.conda
@@ -1300,7 +1211,6 @@ packages:
   - libnvjitlink >=12.8.93,<13.0.0a0
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 170119902
   timestamp: 1743620054443
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libcusparse-dev-12.5.8.93-h5888daf_1.conda
@@ -1316,7 +1226,6 @@ packages:
   constrains:
   - libcusparse-static >=12.5.8.93
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 52819
   timestamp: 1743620381340
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libedit-3.1.20250104-pl5321h7949ede_0.conda
@@ -1329,7 +1238,6 @@ packages:
   - ncurses >=6.5,<7.0a0
   license: BSD-2-Clause
   license_family: BSD
-  purls: []
   size: 134676
   timestamp: 1738479519902
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libexpat-2.7.4-hecca717_0.conda
@@ -1342,7 +1250,6 @@ packages:
   - expat 2.7.4.*
   license: MIT
   license_family: MIT
-  purls: []
   size: 76798
   timestamp: 1771259418166
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libffi-3.4.6-h2dba641_1.conda
@@ -1353,7 +1260,6 @@ packages:
   - libgcc >=13
   license: MIT
   license_family: MIT
-  purls: []
   size: 57433
   timestamp: 1743434498161
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libfreetype-2.14.1-ha770c72_0.conda
@@ -1362,7 +1268,6 @@ packages:
   depends:
   - libfreetype6 >=2.14.1
   license: GPL-2.0-only OR FTL
-  purls: []
   size: 7664
   timestamp: 1757945417134
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libfreetype6-2.14.1-h73754d4_0.conda
@@ -1376,7 +1281,6 @@ packages:
   constrains:
   - freetype >=2.14.1
   license: GPL-2.0-only OR FTL
-  purls: []
   size: 386739
   timestamp: 1757945416744
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.2.0-he0feb66_18.conda
@@ -1390,7 +1294,6 @@ packages:
   - libgomp 15.2.0 he0feb66_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 1041788
   timestamp: 1771378212382
 - conda: https://conda.anaconda.org/conda-forge/noarch/libgcc-devel_linux-64-14.3.0-hf649bbc_118.conda
@@ -1400,7 +1303,6 @@ packages:
   - __unix
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 3084533
   timestamp: 1771377786730
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-15.2.0-h69a702a_18.conda
@@ -1410,7 +1312,6 @@ packages:
   - libgcc 15.2.0 he0feb66_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 27526
   timestamp: 1771378224552
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libglib-2.86.0-h1fed272_0.conda
@@ -1426,7 +1327,6 @@ packages:
   constrains:
   - glib 2.86.0 *_0
   license: LGPL-2.1-or-later
-  purls: []
   size: 3978602
   timestamp: 1757403291664
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libglvnd-1.7.0-ha4b6fd6_2.conda
@@ -1435,7 +1335,6 @@ packages:
   depends:
   - __glibc >=2.17,<3.0.a0
   license: LicenseRef-libglvnd
-  purls: []
   size: 132463
   timestamp: 1731330968309
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-15.2.0-he0feb66_18.conda
@@ -1445,7 +1344,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 603262
   timestamp: 1771378117851
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libiconv-1.18-h3b78370_2.conda
@@ -1455,7 +1353,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libgcc >=14
   license: LGPL-2.1-only
-  purls: []
   size: 790176
   timestamp: 1754908768807
 - conda: https://conda.anaconda.org/conda-forge/linux-64/liblzma-5.8.2-hb03c661_0.conda
@@ -1467,7 +1364,6 @@ packages:
   constrains:
   - xz 5.8.2.*
   license: 0BSD
-  purls: []
   size: 113207
   timestamp: 1768752626120
 - conda: https://conda.anaconda.org/conda-forge/linux-64/liblzma-devel-5.8.2-hb03c661_0.conda
@@ -1478,7 +1374,6 @@ packages:
   - libgcc >=14
   - liblzma 5.8.2 hb03c661_0
   license: 0BSD
-  purls: []
   size: 465085
   timestamp: 1768752643506
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnl-3.11.0-hb9d3cd8_0.conda
@@ -1489,7 +1384,6 @@ packages:
   - libgcc >=13
   license: LGPL-2.1-or-later
   license_family: LGPL
-  purls: []
   size: 741323
   timestamp: 1731846827427
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnpp-12.3.3.100-h9ab20c4_1.conda
@@ -1501,7 +1395,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 136941651
   timestamp: 1742487367851
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnpp-dev-12.3.3.100-h9ab20c4_1.conda
@@ -1516,7 +1409,6 @@ packages:
   constrains:
   - libnpp-static >=12.3.3.100
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 453838
   timestamp: 1742487623161
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnsl-2.0.1-hb9d3cd8_1.conda
@@ -1527,7 +1419,6 @@ packages:
   - libgcc >=13
   license: LGPL-2.1-only
   license_family: GPL
-  purls: []
   size: 33731
   timestamp: 1750274110928
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnuma-2.0.18-hb9d3cd8_3.conda
@@ -1537,7 +1428,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libgcc >=13
   license: LGPL-2.1-only
-  purls: []
   size: 44030
   timestamp: 1749573854077
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnvfatbin-12.8.90-h5888daf_1.conda
@@ -1549,7 +1439,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 812547
   timestamp: 1743628411901
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnvfatbin-dev-12.8.90-h5888daf_1.conda
@@ -1564,7 +1453,6 @@ packages:
   constrains:
   - liblibnvfatbin-static >=12.8.90
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 26980
   timestamp: 1743628432396
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnvjitlink-12.8.93-h5888daf_1.conda
@@ -1576,7 +1464,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 30128577
   timestamp: 1742414274976
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnvjitlink-dev-12.8.93-h5888daf_1.conda
@@ -1591,7 +1478,6 @@ packages:
   constrains:
   - libnvjitlink-static >=12.8.93
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 26242
   timestamp: 1742414429877
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnvjpeg-12.3.5.92-h5888daf_1.conda
@@ -1603,7 +1489,6 @@ packages:
   - libgcc >=13
   - libstdcxx >=13
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 3110993
   timestamp: 1743624752657
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libnvjpeg-dev-12.3.5.92-ha770c72_1.conda
@@ -1616,7 +1501,6 @@ packages:
   constrains:
   - libnvjpeg-static >=12.3.5.92
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 32669
   timestamp: 1743624773129
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libopengl-1.7.0-ha4b6fd6_2.conda
@@ -1626,7 +1510,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libglvnd 1.7.0 ha4b6fd6_2
   license: LicenseRef-libglvnd
-  purls: []
   size: 50757
   timestamp: 1731330993524
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libpng-1.6.55-h421ea60_0.conda
@@ -1637,7 +1520,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libzlib >=1.3.1,<2.0a0
   license: zlib-acknowledgement
-  purls: []
   size: 317669
   timestamp: 1770691470744
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libsanitizer-14.3.0-h8f1669f_18.conda
@@ -1649,7 +1531,6 @@ packages:
   - libstdcxx >=14.3.0
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 7949259
   timestamp: 1771377982207
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libsqlite-3.51.2-hf4e2dac_0.conda
@@ -1661,7 +1542,6 @@ packages:
   - libgcc >=14
   - libzlib >=1.3.1,<2.0a0
   license: blessing
-  purls: []
   size: 942808
   timestamp: 1768147973361
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.2.0-h934c35e_18.conda
@@ -1674,7 +1554,6 @@ packages:
   - libstdcxx-ng ==15.2.0=*_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 5852330
   timestamp: 1771378262446
 - conda: https://conda.anaconda.org/conda-forge/noarch/libstdcxx-devel_linux-64-14.3.0-h9f08a49_118.conda
@@ -1684,7 +1563,6 @@ packages:
   - __unix
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 20171098
   timestamp: 1771377827750
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-15.2.0-hdf11a46_18.conda
@@ -1694,7 +1572,6 @@ packages:
   - libstdcxx 15.2.0 h934c35e_18
   license: GPL-3.0-only WITH GCC-exception-3.1
   license_family: GPL
-  purls: []
   size: 27575
   timestamp: 1771378314494
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libsystemd0-257.10-hd0affe5_4.conda
@@ -1705,7 +1582,6 @@ packages:
   - libcap >=2.77,<2.78.0a0
   - libgcc >=14
   license: LGPL-2.1-or-later
-  purls: []
   size: 491953
   timestamp: 1770738638119
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libudev1-257.10-hd0affe5_4.conda
@@ -1716,7 +1592,6 @@ packages:
   - libcap >=2.77,<2.78.0a0
   - libgcc >=14
   license: LGPL-2.1-or-later
-  purls: []
   size: 144654
   timestamp: 1770738650966
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.41.3-h5347b49_0.conda
@@ -1727,7 +1602,6 @@ packages:
   - libgcc >=14
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 40311
   timestamp: 1766271528534
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libxcb-1.17.0-h8a09558_0.conda
@@ -1741,7 +1615,6 @@ packages:
   - xorg-libxdmcp
   license: MIT
   license_family: MIT
-  purls: []
   size: 395888
   timestamp: 1727278577118
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.36-hd590300_1.conda
@@ -1766,7 +1639,6 @@ packages:
   - xorg-libxau >=1.0.12,<2.0a0
   license: MIT/X11 Derivative
   license_family: MIT
-  purls: []
   size: 837922
   timestamp: 1764794163823
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libxkbfile-1.1.0-h166bdaf_1.conda
@@ -1776,7 +1648,6 @@ packages:
   - libgcc-ng >=12
   license: MIT
   license_family: MIT
-  purls: []
   size: 114087
   timestamp: 1676547070237
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libxml2-2.15.1-he237659_1.conda
@@ -1792,7 +1663,6 @@ packages:
   - libzlib >=1.3.1,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 45402
   timestamp: 1766327161688
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libxml2-16-2.15.1-hca6bf5a_1.conda
@@ -1809,7 +1679,6 @@ packages:
   - libxml2 2.15.1
   license: MIT
   license_family: MIT
-  purls: []
   size: 555747
   timestamp: 1766327145986
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
@@ -1822,7 +1691,6 @@ packages:
   - zlib 1.3.1 *_2
   license: Zlib
   license_family: Other
-  purls: []
   size: 60963
   timestamp: 1727963148474
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
@@ -1832,7 +1700,6 @@ packages:
   - __glibc >=2.17,<3.0.a0
   - libgcc >=13
   license: X11 AND BSD-3-Clause
-  purls: []
   size: 891641
   timestamp: 1738195959188
 - conda: https://conda.anaconda.org/conda-forge/linux-64/nsight-compute-2025.1.1.2-hb5ebaad_1.conda
@@ -1881,7 +1748,6 @@ packages:
   - xorg-libxtst >=1.2.5,<1.3.0a0
   - xorg-libxtst >=1.2.5,<2.0a0
   license: LicenseRef-NVIDIA-End-User-License-Agreement
-  purls: []
   size: 336189366
   timestamp: 1743627515736
 - conda: https://conda.anaconda.org/conda-forge/linux-64/nspr-4.38-h29cc59b_0.conda
@@ -1893,7 +1759,6 @@ packages:
   - libstdcxx >=14
   license: MPL-2.0
   license_family: MOZILLA
-  purls: []
   size: 228588
   timestamp: 1762348634537
 - conda: https://conda.anaconda.org/conda-forge/linux-64/nss-3.118-h445c969_0.conda
@@ -1908,7 +1773,6 @@ packages:
   - nspr >=4.38,<5.0a0
   license: MPL-2.0
   license_family: MOZILLA
-  purls: []
   size: 2057773
   timestamp: 1763485556350
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ocl-icd-2.3.3-hb9d3cd8_0.conda
@@ -1920,7 +1784,6 @@ packages:
   - opencl-headers >=2024.10.24
   license: BSD-2-Clause
   license_family: BSD
-  purls: []
   size: 106742
   timestamp: 1743700382939
 - conda: https://conda.anaconda.org/conda-forge/linux-64/opencl-headers-2025.06.13-h5888daf_0.conda
@@ -1932,7 +1795,6 @@ packages:
   - libstdcxx >=13
   license: Apache-2.0
   license_family: APACHE
-  purls: []
   size: 55357
   timestamp: 1749853464518
 - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.1-h35e630c_1.conda
@@ -1944,7 +1806,6 @@ packages:
   - libgcc >=14
   license: Apache-2.0
   license_family: Apache
-  purls: []
   size: 3164551
   timestamp: 1769555830639
 - conda: https://conda.anaconda.org/conda-forge/linux-64/pcre2-10.46-h1321c63_0.conda
@@ -1957,7 +1818,6 @@ packages:
   - libzlib >=1.3.1,<2.0a0
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 1209177
   timestamp: 1756742976157
 - conda: https://conda.anaconda.org/conda-forge/linux-64/pthread-stubs-0.4-hb9d3cd8_1002.conda
@@ -1968,7 +1828,6 @@ packages:
   - libgcc >=13
   license: MIT
   license_family: MIT
-  purls: []
   size: 8252
   timestamp: 1726802366959
 - conda: https://conda.anaconda.org/conda-forge/linux-64/python-3.10.0-h543edf9_3_cpython.tar.bz2
@@ -1993,7 +1852,6 @@ packages:
   constrains:
   - python_abi 3.10.* *_cp310
   license: Python-2.0
-  purls: []
   size: 31281695
   timestamp: 1637376125446
 - conda: https://conda.anaconda.org/conda-forge/linux-64/rdma-core-61.0-h192683f_0.conda
@@ -2008,7 +1866,6 @@ packages:
   - libudev1 >=257.10
   license: Linux-OpenIB
   license_family: BSD
-  purls: []
   size: 1268666
   timestamp: 1769154883613
 - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
@@ -2020,7 +1877,6 @@ packages:
   - ncurses >=6.5,<7.0a0
   license: GPL-3.0-only
   license_family: GPL
-  purls: []
   size: 345073
   timestamp: 1765813471974
 - conda: https://conda.anaconda.org/conda-forge/linux-64/sqlite-3.51.2-h04a0ce9_0.conda
@@ -2035,7 +1891,6 @@ packages:
   - ncurses >=6.5,<7.0a0
   - readline >=8.3,<9.0a0
   license: blessing
-  purls: []
   size: 183298
   timestamp: 1768147986603
 - conda: https://conda.anaconda.org/conda-forge/noarch/sysroot_linux-64-2.28-h4ee821c_9.conda
@@ -2047,7 +1902,6 @@ packages:
   - tzdata
   license: LGPL-2.0-or-later AND LGPL-2.0-or-later WITH exceptions AND GPL-2.0-or-later
   license_family: GPL
-  purls: []
   size: 24008591
   timestamp: 1765578833462
 - conda: https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h366c992_103.conda
@@ -2061,14 +1915,12 @@ packages:
   - xorg-libx11 >=1.8.12,<2.0a0
   license: TCL
   license_family: BSD
-  purls: []
   size: 3301196
   timestamp: 1769460227866
 - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
   sha256: 1d30098909076af33a35017eed6f2953af1c769e273a0626a04722ac4acaba3c
   md5: ad659d0a2b3e47e38d829aa8cad2d610
   license: LicenseRef-Public-Domain
-  purls: []
   size: 119135
   timestamp: 1767016325805
 - conda: https://conda.anaconda.org/conda-forge/linux-64/uv-0.10.4-h6dd6661_0.conda
@@ -2081,7 +1933,6 @@ packages:
   constrains:
   - __glibc >=2.17
   license: Apache-2.0 OR MIT
-  purls: []
   size: 18322220
   timestamp: 1771408130652
 - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.24.0-h3e06ad9_0.conda
@@ -2095,7 +1946,6 @@ packages:
   - libstdcxx >=13
   license: MIT
   license_family: MIT
-  purls: []
   size: 330474
   timestamp: 1751817998141
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-0.4.1-h4f16b4b_2.conda
@@ -2107,7 +1957,6 @@ packages:
   - libxcb >=1.17.0,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 20772
   timestamp: 1750436796633
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-cursor-0.1.6-hb03c661_0.conda
@@ -2122,7 +1971,6 @@ packages:
   - xcb-util-renderutil >=0.3.10,<0.4.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 20829
   timestamp: 1763366954390
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-image-0.4.0-hb711507_2.conda
@@ -2134,7 +1982,6 @@ packages:
   - xcb-util >=0.4.1,<0.5.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 24551
   timestamp: 1718880534789
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-keysyms-0.4.1-hb711507_0.conda
@@ -2145,7 +1992,6 @@ packages:
   - libxcb >=1.16,<2.0.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 14314
   timestamp: 1718846569232
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-renderutil-0.3.10-hb711507_0.conda
@@ -2156,7 +2002,6 @@ packages:
   - libxcb >=1.16,<2.0.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 16978
   timestamp: 1718848865819
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-wm-0.4.2-hb711507_0.conda
@@ -2167,7 +2012,6 @@ packages:
   - libxcb >=1.16,<2.0.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 51689
   timestamp: 1718844051451
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xkeyboard-config-2.46-hb03c661_0.conda
@@ -2179,7 +2023,6 @@ packages:
   - xorg-libx11 >=1.8.12,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 396975
   timestamp: 1759543819846
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libice-1.1.2-hb9d3cd8_0.conda
@@ -2190,7 +2033,6 @@ packages:
   - libgcc >=13
   license: MIT
   license_family: MIT
-  purls: []
   size: 58628
   timestamp: 1734227592886
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libsm-1.2.6-he73a12e_0.conda
@@ -2203,7 +2045,6 @@ packages:
   - xorg-libice >=1.1.2,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 27590
   timestamp: 1741896361728
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libx11-1.8.13-he1eb515_0.conda
@@ -2215,7 +2056,6 @@ packages:
   - libxcb >=1.17.0,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 839652
   timestamp: 1770819209719
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxau-1.0.12-hb03c661_1.conda
@@ -2226,7 +2066,6 @@ packages:
   - libgcc >=14
   license: MIT
   license_family: MIT
-  purls: []
   size: 15321
   timestamp: 1762976464266
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxcomposite-0.4.7-hb03c661_0.conda
@@ -2239,7 +2078,6 @@ packages:
   - xorg-libxfixes >=6.0.2,<7.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 14415
   timestamp: 1770044404696
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxdamage-1.1.6-hb9d3cd8_0.conda
@@ -2253,7 +2091,6 @@ packages:
   - xorg-libxfixes >=6.0.1,<7.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 13217
   timestamp: 1727891438799
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxdmcp-1.1.5-hb03c661_1.conda
@@ -2264,7 +2101,6 @@ packages:
   - libgcc >=14
   license: MIT
   license_family: MIT
-  purls: []
   size: 20591
   timestamp: 1762976546182
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxext-1.3.7-hb03c661_0.conda
@@ -2276,7 +2112,6 @@ packages:
   - xorg-libx11 >=1.8.12,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 50326
   timestamp: 1769445253162
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxfixes-6.0.2-hb03c661_0.conda
@@ -2288,7 +2123,6 @@ packages:
   - xorg-libx11 >=1.8.12,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 20071
   timestamp: 1759282564045
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxi-1.8.2-hb9d3cd8_0.conda
@@ -2302,7 +2136,6 @@ packages:
   - xorg-libxfixes >=6.0.1,<7.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 47179
   timestamp: 1727799254088
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxrandr-1.5.5-hb03c661_0.conda
@@ -2316,7 +2149,6 @@ packages:
   - xorg-libxrender >=0.9.12,<0.10.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 30456
   timestamp: 1769445263457
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxrender-0.9.12-hb9d3cd8_0.conda
@@ -2328,7 +2160,6 @@ packages:
   - xorg-libx11 >=1.8.10,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 33005
   timestamp: 1734229037766
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxtst-1.2.5-hb9d3cd8_3.conda
@@ -2342,7 +2173,6 @@ packages:
   - xorg-libxi >=1.7.10,<2.0a0
   license: MIT
   license_family: MIT
-  purls: []
   size: 32808
   timestamp: 1727964811275
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xz-5.8.2-ha02ee65_0.conda
@@ -2356,7 +2186,6 @@ packages:
   - xz-gpl-tools 5.8.2 ha02ee65_0
   - xz-tools 5.8.2 hb03c661_0
   license: 0BSD AND LGPL-2.1-or-later AND GPL-2.0-or-later
-  purls: []
   size: 24101
   timestamp: 1768752698238
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xz-gpl-tools-5.8.2-ha02ee65_0.conda
@@ -2369,7 +2198,6 @@ packages:
   constrains:
   - xz 5.8.2.*
   license: 0BSD AND LGPL-2.1-or-later AND GPL-2.0-or-later
-  purls: []
   size: 33774
   timestamp: 1768752679459
 - conda: https://conda.anaconda.org/conda-forge/linux-64/xz-tools-5.8.2-hb03c661_0.conda
@@ -2382,7 +2210,6 @@ packages:
   constrains:
   - xz 5.8.2.*
   license: 0BSD AND LGPL-2.1-or-later
-  purls: []
   size: 96093
   timestamp: 1768752662020
 - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
@@ -2393,6 +2220,5 @@ packages:
   - libzlib >=1.3.1,<2.0a0
   license: BSD-3-Clause
   license_family: BSD
-  purls: []
   size: 601375
   timestamp: 1764777111296

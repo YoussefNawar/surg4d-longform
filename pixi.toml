@@ -5,10 +5,6 @@ name = "surgery-scene-graphs"
 platforms = ["linux-64"]
 version = "0.1.0"
 
-[system-requirements]
-linux = "5.10"
-cuda = "12.8"
-
 [activation.env]
 # LIBRARY_PATH needed for Triton to find libcuda.so at compile time
 LIBRARY_PATH = "$PIXI_PROJECT_ROOT/.pixi/envs/default/lib/stubs:$PIXI_PROJECT_ROOT/.pixi/envs/default/lib:$LIBRARY_PATH"
@@ -56,7 +52,8 @@ uv pip install \
   qwen-vl-utils==0.0.14 \
   rerun-sdk \
   accelerate \
-  transformers==4.57.1
+  transformers==4.57.1 \
+  notebook==7.5.3
 """
 
 
