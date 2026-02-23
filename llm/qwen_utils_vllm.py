@@ -17,7 +17,7 @@ from transformers import Qwen3VLProcessor
 from .tools import IMAGE_PLACEHOLDER
 
 THINKING_TOKEN_LIMIT = 8000
-NEW_TOKEN_LIMIT = 10000
+NEW_TOKEN_LIMIT = 16384
 
 
 @dataclass
