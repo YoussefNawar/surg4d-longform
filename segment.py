@@ -55,11 +55,6 @@ def _build_training_root(cfg: DictConfig):
         clip_dir for clip_dir in all_clip_dirs if clip_dir.name not in excluded_clip_names
     ]
 
-    # ! tmp
-    import pprint
-    pprint.pprint([clip_dir.name for clip_dir in included_clip_dirs])
-    included_clip_dirs = included_clip_dirs[:10]
-
     for clip_dir in tqdm(included_clip_dirs, desc="Preparing segment training clips", unit="clip"):
         rel_parent = clip_dir.parent.relative_to(source_root)
         target_clip_dir = train_root / rel_parent / clip_dir.name
