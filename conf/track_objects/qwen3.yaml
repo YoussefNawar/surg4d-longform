@@ -11,5 +11,5 @@ cotracker_depth_jump_threshold: 0.1
 cotracker_k_neighbors: 3
 cotracker_idw_power: 2.0
 
-instance_merge_containment_threshold: 0.1
+instance_merge_containment_threshold: 0.2
 instance_merge_containment_radius: 2.5
