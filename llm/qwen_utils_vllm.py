@@ -7,7 +7,7 @@ import sysconfig
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import torch
@@ -17,7 +17,7 @@ from transformers import Qwen3VLProcessor
 from .tools import IMAGE_PLACEHOLDER
 
 THINKING_TOKEN_LIMIT = 8000
-NEW_TOKEN_LIMIT = 16384
+NEW_TOKEN_LIMIT = 10000
 
 
 @dataclass
@@ -150,6 +150,7 @@ def _set_generation_seed(seed: int) -> None:
 def _sampling_params(
     seed: int,
     max_new_tokens: int,
+    stop: Optional[List[str]] = None,
 ) -> Any:
     from vllm import SamplingParams
 
@@ -160,6 +161,8 @@ def _sampling_params(
         "max_tokens": max_new_tokens,
         "seed": seed,
     }
+    if stop is not None:
+        kwargs["stop"] = stop
     return SamplingParams(**kwargs)
 
 
@@ -179,25 +182,68 @@ def _generate_text(
     prompt: str,
     max_new_tokens: int,
     seed: int,
+    max_thinking_tokens: Optional[int] = None,
     multi_modal_data: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, int, float]:
-    params = _sampling_params(
-        seed=seed,
-        max_new_tokens=max_new_tokens,
-    )
-
     llm_input: Dict[str, Any] = {"prompt": prompt}
     if multi_modal_data is not None:
         llm_input["multi_modal_data"] = multi_modal_data
 
-    start = time.time()
-    outputs = model.llm.generate([llm_input], sampling_params=params)
-    end = time.time()
+    # plain single generation pass if no thinking limit
+    if max_thinking_tokens is None:
+        params = _sampling_params(
+            seed=seed,
+            max_new_tokens=max_new_tokens,
+        )
+        start = time.time()
+        outputs = model.llm.generate([llm_input], sampling_params=params)
+        end = time.time()
 
-    output = outputs[0]
-    text = _extract_text_from_request_output(output)
-    num_tokens = _extract_generated_token_count(output)
-    return text, num_tokens, end - start
+        output = outputs[0]
+        text = _extract_text_from_request_output(output)
+        num_tokens = _extract_generated_token_count(output)
+        return text, num_tokens, end - start
+
+    total_time = 0.0
+    total_tokens = 0
+    forced_think_prefix = ""
+
+    # if thinking limit make one pass with thinking token budget, force append </think> if not present, then do second pass for final answer
+    if max_thinking_tokens > 0:
+        think_params = _sampling_params(
+            seed=seed,
+            max_new_tokens=max_thinking_tokens,
+            stop=["</think>"],
+        )
+        think_start = time.time()
+        think_outputs = model.llm.generate([llm_input], sampling_params=think_params)
+        think_end = time.time()
+        think_output = think_outputs[0]
+        forced_think_prefix = _extract_text_from_request_output(think_output)
+        total_tokens += _extract_generated_token_count(think_output)
+        total_time += think_end - think_start
+
+    if "</think>" not in forced_think_prefix:
+        forced_think_prefix = f"{forced_think_prefix}\n</think>\n"
+
+    answer_input = {"prompt": prompt + forced_think_prefix}
+    if multi_modal_data is not None:
+        answer_input["multi_modal_data"] = multi_modal_data
+
+    answer_params = _sampling_params(
+        seed=seed + 1,
+        max_new_tokens=max_new_tokens,
+    )
+    answer_start = time.time()
+    answer_outputs = model.llm.generate([answer_input], sampling_params=answer_params)
+    answer_end = time.time()
+
+    answer_output = answer_outputs[0]
+    answer_text = _extract_text_from_request_output(answer_output)
+    total_tokens += _extract_generated_token_count(answer_output)
+    total_time += answer_end - answer_start
+
+    return forced_think_prefix + answer_text, total_tokens, total_time
 
 
 
@@ -230,7 +276,6 @@ def prompt_with_image(
         tokenize=False,
         add_generation_prompt=True,
     )
-    _ = max_thinking_tokens
 
     _set_generation_seed(seed)
     output_text, _, _ = _generate_text(
@@ -238,6 +283,7 @@ def prompt_with_image(
         prompt=text_prompt,
         max_new_tokens=max_new_tokens,
         seed=seed,
+        max_thinking_tokens=max_thinking_tokens,
         multi_modal_data={"image": image},
     )
     return output_text
@@ -411,7 +457,6 @@ def generate_agentic(
     max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
 ) -> Dict[str, Any]:
     fn_start_time = time.time()
-    _ = max_thinking_tokens
     tool_specs = [spec for _, spec in tools.values()]
 
     current_messages = [msg.copy() for msg in messages]
@@ -458,6 +503,7 @@ def generate_agentic(
                 prompt=text_prompt,
                 max_new_tokens=max_new_tokens,
                 seed=seed + iteration,
+                max_thinking_tokens=max_thinking_tokens,
                 multi_modal_data={"image": all_raw_images} if all_raw_images else None,
             )
             total_generation_time += generation_time
@@ -719,7 +765,6 @@ def prompt_with_video(
     max_thinking_tokens: int = THINKING_TOKEN_LIMIT,
 ) -> str:
     image_paths_str = [str(p) for p in image_paths]
-    _ = max_thinking_tokens
 
     content = []
     video_content: Dict[str, Any] = {"type": "video", "video": image_paths_str}
@@ -769,6 +814,7 @@ def prompt_with_video(
         prompt=text_prompt,
         max_new_tokens=max_new_tokens,
         seed=seed,
+        max_thinking_tokens=max_thinking_tokens,
         multi_modal_data={"video": multi_modal_video},
     )
     return output_text
