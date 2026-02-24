@@ -233,20 +233,8 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
         frame_stride=clip.frame_stride,
     )
 
-    # estimate crops to remove black borders from selected semantic mask source
-    if cfg.preprocess.semantic_mask_source == "gt":
-        first_class_ids = seg8k_endo_watershed_to_class_ids(Image.open(semantic_mask_files[0]))
-    elif cfg.preprocess.semantic_mask_source == "sasvi":
-        first_pred_mask_path = (
-            clip_dir
-            / cfg.preprocess.predicted_semantic_mask_subdir
-            / "frame_000000.npy"
-        )
-        first_class_ids = np.load(first_pred_mask_path)
-    else:
-        raise ValueError(
-            f"Unknown semantic_mask_source: {cfg.preprocess.semantic_mask_source}"
-        )
+    # estimate crops to remove black borders from first GT semantic mask
+    first_class_ids = seg8k_endo_watershed_to_class_ids(Image.open(semantic_mask_files[0]))
 
     top, bottom, left, right = estimate_crop_box(first_class_ids)
 
