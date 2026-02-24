@@ -7,7 +7,7 @@ checkpoint_filename: best_val_dice.pth
 
 prediction_subdir: semantic_masks_sasvi_orig_res
 
-run_training: true
+run_training: false
 run_inference: true
 
 checkpoint_path: output/segment/maskrcnn_cholecseg/[latest]/best_val_dice.pth

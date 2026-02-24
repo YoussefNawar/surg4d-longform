@@ -1,0 +1,22 @@
+semantic_mask_source: sasvi
+predicted_semantic_mask_subdir: ${segment.prediction_subdir}
+
+semantic_mask_subdir: semantic_masks_sasvi
+instance_mask_subdir: instance_masks_sasvi
+overlay_subdir: overlayed_images_sasvi
+image_subdir: images
+spatial_labels_output_filename: spatial_annotations.json
+
+annotation_root: data/annotations
+annotation_stride: 4
+
+dump_label_visualizations: true
+label_viz_subdir: label_viz
+
+frames_divisor: ${extract_geometry.da3_vit_patch_size}
+
+min_component_area: 5
+
+overlay_label_mode: "index_and_class"  # class or index_and_class
+
+only_update_annotations: false

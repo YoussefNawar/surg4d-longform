@@ -1,0 +1,14 @@
+graph_output_subdir: graph_precomputed_sasvi
+cotracker_subdir: ${track_objects.cotracker_subdir}
+
+min_cluster_size: 50
+
+temporal_lof_outlier_filter:
+  n_neighbors: 20
+  contamination: 0.1
+  min_cluster_points: 20
+  strong_negative_outlier_factor_threshold: -1.0
+
+timestep_stride: 4
+
+graph_edge_threshold: 0.05 # edge if bhattacharyya coefficient >= threshold

@@ -1,10 +1,10 @@
 defaults:
   - clips: final_dataset
   - segment: sasvi_maskrcnn
-  - preprocess: qwen3
-  - extract_geometry: qwen3
-  - track_objects: qwen3
-  - graph_extraction: precomputed_qwen3
+  - preprocess: sasvi_masks
+  - extract_geometry: default
+  - track_objects: sasvi_masks
+  - graph_extraction: sasvi_masks
   - eval: default
   - compute_metrics: default
   - _self_
