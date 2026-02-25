@@ -17,6 +17,7 @@ from utils.da3_geometry_utils import load_da3_geometry
 def track_control_points(
     image_files: list,
     n_points_per_frame: int = 1024,
+    init_from_middle_frame_only: bool = False,
     save_dir: Path = None,
     seed: int = 42,
 ) -> torch.Tensor:
@@ -29,6 +30,8 @@ def track_control_points(
     Args:
         image_files: List of image file paths
         n_points_per_frame: Number of random points to sample per query frame
+        init_from_middle_frame_only: If True, only initialize random points from middle
+            frame and run bidirectional tracking; if False, initialize from first/middle/last
         save_dir: Directory to save visualizations
         seed: Random seed for reproducibility
     
@@ -58,8 +61,11 @@ def track_control_points(
     n_frames = images_torch.shape[1]
     H, W = images_torch.shape[3], images_torch.shape[4]
     
-    # Query frames: beginning, middle, end
-    query_frames = [0, n_frames // 2, n_frames - 1]
+    # Query frames: either middle only (bidirectional) or beginning/middle/end
+    if init_from_middle_frame_only:
+        query_frames = [n_frames // 2]
+    else:
+        query_frames = [0, n_frames // 2, n_frames - 1]
     
     # Set random seed for reproducibility
     torch.manual_seed(seed)
@@ -109,17 +115,18 @@ def lift_control_points_to_3d(
     geometry_npz_path: Path,
     image_files: List[Path],
     depth_jump_threshold: float,
+    fill_occlusions: bool,
     save_dir: Path = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Lift 2D control points to 3D world coordinates using DA3 depth maps and camera parameters.
     
-    Features camera-aware depth propagation (while accounting for camera motion), depth jump detection
-    (kills points that jump between surfaces due to 2D tracking errors), and color forwarding (propagates last valid color
-    for occluded points).
+    Features optional camera-aware depth propagation (while accounting for camera motion),
+    depth jump detection (kills points that jump between surfaces due to 2D tracking errors),
+    and color forwarding (propagates last valid color for occluded points).
     
-    Only returns points that are valid (have depth > 0) at ALL timesteps after forward/backward filling.
-    Points that are killed or never observed are filtered out entirely.
+    Only returns points that are valid (have depth > 0) at ALL timesteps after optional
+    forward/backward filling. Points that are killed or never observed are filtered out entirely.
     
     Args:
         control_points_2d: (T, N_points, 2) 2D pixel coordinates (torch.Tensor on GPU)
@@ -128,6 +135,9 @@ def lift_control_points_to_3d(
         image_files: List of image file paths (sorted by frame number)
         depth_jump_threshold: Absolute depth change threshold (meters) for killing points that jump
                               between surfaces. Set to None to disable.
+        fill_occlusions: If True, fill occluded/missing points via camera-aware forward/backward
+             reprojection. If False, no fill is applied and positive DA3 depths are used
+             directly at tracked 2D locations regardless of CoTracker visibility.
         save_dir: Directory to save visualizations
     
     Returns:
@@ -194,9 +204,14 @@ def lift_control_points_to_3d(
         y_coords = torch.clamp(points_2d_scaled_y.int(), 0, H - 1)
         depths = depth_map_torch[y_coords, x_coords]  # (N_grid,)
         
-        # Only use depth if point is visible and depth is valid
-        visible_and_valid = visibility_torch[t] & (depths > 0)
-        all_depths[t] = torch.where(visible_and_valid, depths, 0.0)
+        # With occlusion filling enabled, only trust depths when CoTracker marks points visible.
+        # With filling disabled, use positive DA3 depth directly at tracked 2D positions,
+        # even if CoTracker marks the point as occluded in that frame.
+        if fill_occlusions:
+            valid_depth = visibility_torch[t] & (depths > 0)
+        else:
+            valid_depth = depths > 0
+        all_depths[t] = torch.where(valid_depth, depths, 0.0)
     
     # Helper functions for 3D operations
     def unproject_to_world(points_2d: torch.Tensor, depths: torch.Tensor, K: torch.Tensor, c2w: torch.Tensor) -> torch.Tensor:
@@ -241,10 +256,18 @@ def lift_control_points_to_3d(
     filled_colors = torch.zeros((T, N_grid, 3), device="cuda", dtype=torch.uint8)
     was_filled = torch.zeros((T, N_grid), device="cuda", dtype=torch.bool)  # Track which were forward/backward filled
     
-    # Create initial valid mask (visible AND depth > 0)
-    valid_mask = visibility_torch & (all_depths > 0)  # (T, N_grid)
+    # Create initial valid mask.
+    # - fill_occlusions=True: visible AND depth > 0
+    # - fill_occlusions=False: depth > 0 regardless of visibility
+    if fill_occlusions:
+        valid_mask = visibility_torch & (all_depths > 0)  # (T, N_grid)
+    else:
+        valid_mask = all_depths > 0
     
-    logger.info("Forward-filling with camera-aware depth propagation, depth jump detection, and color forwarding...")
+    if fill_occlusions:
+        logger.info("Forward-filling with camera-aware depth propagation, depth jump detection, and color forwarding...")
+    else:
+        logger.info("Depth jump detection enabled, occlusion filling disabled...")
     killed_count = 0
     
     for t in range(T):
@@ -293,66 +316,72 @@ def lift_control_points_to_3d(
             filled_depths[t] = torch.where(valid_at_t, sampled_depth, filled_depths[t])
             filled_colors[t] = torch.where(valid_at_t.unsqueeze(-1), current_colors, filled_colors[t])
         
-        # For points needing fill (invalid but have been seen before): reproject world position
-        needs_fill = ~valid_at_t & has_valid_forward & ~killed_points
-        if needs_fill.any():
-            reprojected_depth = project_to_depth(last_valid_world_pos, w2c)
-            # Either keep depth and color that was previously computed or assign reprojected depth and prev color
-            filled_depths[t] = torch.where(needs_fill, reprojected_depth, filled_depths[t])
-            filled_colors[t] = torch.where(needs_fill.unsqueeze(-1), last_valid_colors, filled_colors[t])
-            was_filled[t] = was_filled[t] | needs_fill
+        if fill_occlusions:
+            # For points needing fill (invalid but have been seen before): reproject world position
+            needs_fill = ~valid_at_t & has_valid_forward & ~killed_points
+            if needs_fill.any():
+                reprojected_depth = project_to_depth(last_valid_world_pos, w2c)
+                # Either keep depth and color that was previously computed or assign reprojected depth and prev color
+                filled_depths[t] = torch.where(needs_fill, reprojected_depth, filled_depths[t])
+                filled_colors[t] = torch.where(needs_fill.unsqueeze(-1), last_valid_colors, filled_colors[t])
+                was_filled[t] = was_filled[t] | needs_fill
     
     if killed_count > 0:
         logger.info(f"Killed {killed_count} points due to depth jumps (threshold={depth_jump_threshold}m)")
     
-    # Backward-fill: for points that were never seen valid in forward pass
-    # These need depth from the first future frame where they become valid
-    logger.info("Backward-filling remaining points...")
-    next_valid_world_pos = torch.zeros((N_grid, 3), device="cuda", dtype=torch.float32)
-    next_valid_colors = torch.zeros((N_grid, 3), device="cuda", dtype=torch.uint8)
-    has_valid_backward = torch.zeros(N_grid, device="cuda", dtype=torch.bool)
-    
-    # Starting from the back
-    for t in range(T - 1, -1, -1):
-        K = K_tensors[t]
-        c2w = c2w_tensors[t]
-        w2c = w2c_tensors[t]
-        points_2d = control_points_2d[t]
-        sampled_depth = all_depths[t]
+    if fill_occlusions:
+        # Backward-fill: for points that were never seen valid in forward pass
+        # These need depth from the first future frame where they become valid
+        logger.info("Backward-filling remaining points...")
+        next_valid_world_pos = torch.zeros((N_grid, 3), device="cuda", dtype=torch.float32)
+        next_valid_colors = torch.zeros((N_grid, 3), device="cuda", dtype=torch.uint8)
+        has_valid_backward = torch.zeros(N_grid, device="cuda", dtype=torch.bool)
         
-        # Get colors for this frame (already computed in forward pass, but need for backward valid points)
-        img = images[t]
-        img_H, img_W = img.shape[:2]
-        x_img = torch.clamp(points_2d[:, 0].long(), 0, img_W - 1).cpu().numpy()
-        y_img = torch.clamp(points_2d[:, 1].long(), 0, img_H - 1).cpu().numpy()
-        current_colors = torch.from_numpy(img[y_img, x_img]).to("cuda")
-        
-        valid_at_t = valid_mask[t] & ~killed_points
-        
-        # Update next valid world position for valid points
-        if valid_at_t.any():
-            world_pos = unproject_to_world(points_2d, sampled_depth, K, c2w)
-            next_valid_world_pos = torch.where(valid_at_t.unsqueeze(-1), world_pos, next_valid_world_pos)
-            next_valid_colors = torch.where(valid_at_t.unsqueeze(-1), current_colors, next_valid_colors)
-            has_valid_backward = has_valid_backward | valid_at_t
-        
-        # For points that still need fill (weren't filled in forward pass)
-        still_needs_fill = (filled_depths[t] == 0) & has_valid_backward & ~killed_points
-        if still_needs_fill.any():
-            reprojected_depth = project_to_depth(next_valid_world_pos, w2c)
-            reprojected_depth = torch.clamp(reprojected_depth, min=0.001)
+        # Starting from the back
+        for t in range(T - 1, -1, -1):
+            K = K_tensors[t]
+            c2w = c2w_tensors[t]
+            w2c = w2c_tensors[t]
+            points_2d = control_points_2d[t]
+            sampled_depth = all_depths[t]
             
-            filled_depths[t] = torch.where(still_needs_fill, reprojected_depth, filled_depths[t])
-            filled_colors[t] = torch.where(still_needs_fill.unsqueeze(-1), next_valid_colors, filled_colors[t])
-            was_filled[t] = was_filled[t] | still_needs_fill
+            # Get colors for this frame (already computed in forward pass, but need for backward valid points)
+            img = images[t]
+            img_H, img_W = img.shape[:2]
+            x_img = torch.clamp(points_2d[:, 0].long(), 0, img_W - 1).cpu().numpy()
+            y_img = torch.clamp(points_2d[:, 1].long(), 0, img_H - 1).cpu().numpy()
+            current_colors = torch.from_numpy(img[y_img, x_img]).to("cuda")
+            
+            valid_at_t = valid_mask[t] & ~killed_points
+            
+            # Update next valid world position for valid points
+            if valid_at_t.any():
+                world_pos = unproject_to_world(points_2d, sampled_depth, K, c2w)
+                next_valid_world_pos = torch.where(valid_at_t.unsqueeze(-1), world_pos, next_valid_world_pos)
+                next_valid_colors = torch.where(valid_at_t.unsqueeze(-1), current_colors, next_valid_colors)
+                has_valid_backward = has_valid_backward | valid_at_t
+            
+            # For points that still need fill (weren't filled in forward pass)
+            still_needs_fill = (filled_depths[t] == 0) & has_valid_backward & ~killed_points
+            if still_needs_fill.any():
+                reprojected_depth = project_to_depth(next_valid_world_pos, w2c)
+                reprojected_depth = torch.clamp(reprojected_depth, min=0.001)
+                
+                filled_depths[t] = torch.where(still_needs_fill, reprojected_depth, filled_depths[t])
+                filled_colors[t] = torch.where(still_needs_fill.unsqueeze(-1), next_valid_colors, filled_colors[t])
+                was_filled[t] = was_filled[t] | still_needs_fill
     
     # Determine permanently valid points: valid depth at ALL frames and not killed
     permanently_valid = (filled_depths > 0).all(dim=0) & ~killed_points  # (N_grid,)
     valid_indices = permanently_valid.nonzero(as_tuple=True)[0]  # (N_valid,)
     N_valid = valid_indices.shape[0]
     
-    logger.info(f"Filtered {N_grid} control points to {N_valid} permanently valid points "
-                f"({N_grid - N_valid} removed: {killed_count} killed, {N_grid - N_valid - killed_count} never valid)")
+    if fill_occlusions:
+        logger.info(f"Filtered {N_grid} control points to {N_valid} permanently valid points "
+                    f"({N_grid - N_valid} removed: {killed_count} killed, {N_grid - N_valid - killed_count} never valid)")
+    else:
+        logger.info(f"Filtered {N_grid} control points to {N_valid} always-directly-valid points "
+                    f"({N_grid - N_valid} removed: {killed_count} killed, {N_grid - N_valid - killed_count} occluded/invalid)")
     
     # Filter to keep only permanently valid points
     filled_depths_filtered = filled_depths[:, valid_indices]  # (T, N_valid)

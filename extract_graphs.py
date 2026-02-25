@@ -317,20 +317,21 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
     ply_colors = ply_colors[cluster_mask]
 
     # filter outliers within clusters
-    logger.info(f"Temporal LOF outlier filtering...")
-    temporal_outlier_mask = temporal_lof_outlier_mask(
-        points_through_time,
-        clusters,
-        cfg,
-        histogram_output_dir=graph_output_dir,
-    )
-    keep_mask = ~temporal_outlier_mask
-    logger.info(
-        f"Temporal LOF removed {temporal_outlier_mask.sum()} / {len(temporal_outlier_mask)} gaussians"
-    )
-    points_through_time = points_through_time[:, keep_mask, :]
-    clusters = clusters[keep_mask]
-    ply_colors = ply_colors[keep_mask]
+    if cfg.graph_extraction.temporal_lof_outlier_filter.enabled:
+        logger.info(f"Temporal LOF outlier filtering...")
+        temporal_outlier_mask = temporal_lof_outlier_mask(
+            points_through_time,
+            clusters,
+            cfg,
+            histogram_output_dir=graph_output_dir,
+        )
+        keep_mask = ~temporal_outlier_mask
+        logger.info(
+            f"Temporal LOF removed {temporal_outlier_mask.sum()} / {len(temporal_outlier_mask)} gaussians"
+        )
+        points_through_time = points_through_time[:, keep_mask, :]
+        clusters = clusters[keep_mask]
+        ply_colors = ply_colors[keep_mask]
 
     # cluster properties
     logger.info(f"Computing cluster features...")

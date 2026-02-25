@@ -1,9 +1,10 @@
-graph_output_subdir: graph_precomputed
+graph_output_subdir: graph_precomputed_nolof
 cotracker_subdir: ${track_objects.cotracker_subdir}
 
 min_cluster_size: 50
 
 temporal_lof_outlier_filter:
+  enabled: true
   n_neighbors: 20
   contamination: 0.1
   min_cluster_points: 20

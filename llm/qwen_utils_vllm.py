@@ -16,8 +16,8 @@ from transformers import Qwen3VLProcessor
 
 from .tools import IMAGE_PLACEHOLDER
 
-THINKING_TOKEN_LIMIT = 8000
-NEW_TOKEN_LIMIT = 10000
+MAX_THINKING_TOKENS = 8000
+MAX_NEW_TOKENS = 10000
 
 
 @dataclass
@@ -180,9 +180,9 @@ def _extract_generated_token_count(request_output: Any) -> int:
 def _generate_text(
     model: VLLMQwen3Model,
     prompt: str,
-    max_new_tokens: int,
     seed: int,
-    max_thinking_tokens: Optional[int] = None,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    max_thinking_tokens: Optional[int] = MAX_THINKING_TOKENS,
     multi_modal_data: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, int, float]:
     llm_input: Dict[str, Any] = {"prompt": prompt}
@@ -253,8 +253,8 @@ def prompt_with_image(
     model: VLLMQwen3Model,
     processor: Qwen3VLProcessor,
     system_prompt: str = "You are a medical assistant designed to aid medical practitioners during a cholecystectomy procedure. The surgeon user will ask you a question and show you their current situation, and you give a concise answer.",
-    max_new_tokens: int = NEW_TOKEN_LIMIT,
-    max_thinking_tokens: int = THINKING_TOKEN_LIMIT,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    max_thinking_tokens: int = MAX_THINKING_TOKENS,
     seed: int = 42,
 ):
     messages = [
@@ -281,8 +281,8 @@ def prompt_with_image(
     output_text, _, _ = _generate_text(
         model=model,
         prompt=text_prompt,
-        max_new_tokens=max_new_tokens,
         seed=seed,
+        max_new_tokens=max_new_tokens,
         max_thinking_tokens=max_thinking_tokens,
         multi_modal_data={"image": image},
     )
@@ -453,8 +453,8 @@ def generate_agentic(
     tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
     verbose: bool = False,
     seed: int = 42,
-    max_new_tokens: int = NEW_TOKEN_LIMIT,
-    max_thinking_tokens: Optional[int] = THINKING_TOKEN_LIMIT,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    max_thinking_tokens: Optional[int] = MAX_THINKING_TOKENS,
 ) -> Dict[str, Any]:
     fn_start_time = time.time()
     tool_specs = [spec for _, spec in tools.values()]
@@ -501,8 +501,8 @@ def generate_agentic(
             response, generated_tokens, generation_time = _generate_text(
                 model=model,
                 prompt=text_prompt,
-                max_new_tokens=max_new_tokens,
                 seed=seed + iteration,
+                max_new_tokens=max_new_tokens,
                 max_thinking_tokens=max_thinking_tokens,
                 multi_modal_data={"image": all_raw_images} if all_raw_images else None,
             )
@@ -660,8 +660,8 @@ def prompt_graph_agent_with_semantic_labels(
     tool_call_limits: Optional[Dict[str, Optional[int]]] = None,
     verbose: bool = False,
     seed: int = 42,
-    max_new_tokens: int = 8192,
-    max_thinking_tokens: Optional[int] = None,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    max_thinking_tokens: Optional[int] = MAX_THINKING_TOKENS,
 ):
     assert tools is not None and len(tools) > 0, (
         "tools are required for graph agentic prompting"
@@ -761,8 +761,8 @@ def prompt_with_video(
     system_prompt: str = None,
     fps: float = None,
     seed: int = 42,
-    max_new_tokens: int = NEW_TOKEN_LIMIT,
-    max_thinking_tokens: int = THINKING_TOKEN_LIMIT,
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    max_thinking_tokens: int = MAX_THINKING_TOKENS,
 ) -> str:
     image_paths_str = [str(p) for p in image_paths]
 
@@ -812,8 +812,8 @@ def prompt_with_video(
     output_text, _, _ = _generate_text(
         model=model,
         prompt=text_prompt,
-        max_new_tokens=max_new_tokens,
         seed=seed,
+        max_new_tokens=max_new_tokens,
         max_thinking_tokens=max_thinking_tokens,
         multi_modal_data={"video": multi_modal_video},
     )

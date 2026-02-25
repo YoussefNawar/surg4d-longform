@@ -518,6 +518,7 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
     control_points_2d, visibility = track_control_points(
         image_files,
         n_points_per_frame=cfg.track_objects.cotracker_n_points_per_frame,
+        init_from_middle_frame_only=not cfg.track_objects.cotracker_init_from_multiple_frames,
         save_dir=cotracker_dir,
     )
     # shape of control points: (T, N_total, 2) where N_total = n_points_per_frame * 3
@@ -525,13 +526,18 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
     
     # Lift control points to 3D using DA3 depth and camera parameters
     logger.info("Lifting control points to 3D...")
-    depth_jump_threshold = cfg.track_objects.cotracker_depth_jump_threshold
+    depth_jump_threshold = (
+        cfg.track_objects.cotracker_depth_jump_threshold
+        if cfg.track_objects.cotracker_filter_depth_jumps
+        else None
+    )
     control_points_3d, control_points_2d = lift_control_points_to_3d(
         control_points_2d,
         visibility,
         geometry_npz_path,
         image_files,
         depth_jump_threshold=depth_jump_threshold,
+        fill_occlusions=cfg.track_objects.cotracker_fill_occlusions,
         save_dir=cotracker_dir,
     )
     # control_points_3d: (T, N_valid, 3) - only permanently valid points
