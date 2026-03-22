@@ -38,8 +38,7 @@ def load_da3_geometry(
     ]
     w2c_list = [w2c_h[t].astype(np.float32) for t in range(w2c_h.shape[0])]
     c2w_list = [
-        np.linalg.inv(w2c_h[t]).astype(np.float32)
-        for t in range(w2c_h.shape[0])
+        np.linalg.inv(w2c_h[t]).astype(np.float32) for t in range(w2c_h.shape[0])
     ]
 
     return depth_all, conf_all, intrinsics_all, intrinsics_list, w2c_list, c2w_list

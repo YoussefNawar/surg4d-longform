@@ -10,14 +10,12 @@ from PIL import Image
 from benchmark.graph_utils import get_coord_transformations
 from utils.rerun_utils import _compute_scene_extent
 
-
 IMAGE_PLACEHOLDER = "<image/>"
 RERUN_INITIALIZED = False
 
 # Percentile used to select boundary gaussians for KDTree contact/overlap calculations.
 # Lower values (e.g. 2) make the "boundary" smaller and reduce influence from outliers.
 BOUNDARY_PERCENTILE = 2.0
-
 
 
 spec_node_distances_through_time = {
@@ -48,13 +46,13 @@ def node_distances_through_time(
     clusters: np.ndarray,
     node_id_1: int,
     node_id_2: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Compute minimum distances between two nodes through time.
-    
+
     Uses KDTree for efficient pairwise distance computation and takes the mean
     of the lowest BOUNDARY_PERCENTILE percentile distances for robustness (see `BOUNDARY_PERCENTILE`).
-    
+
     Args:
         positions: Gaussian positions (T, n_gaussians, 3)
         clusters: Cluster assignment per gaussian (n_gaussians,)
@@ -98,8 +96,12 @@ def node_distances_through_time(
         tree2 = KDTree(pos2)
 
         # Find distances to closest point in other cluster
-        dists1, _ = tree2.query(pos1)  # For each point in cluster 1, dist to closest in cluster 2
-        dists2, _ = tree1.query(pos2)  # For each point in cluster 2, dist to closest in cluster 1
+        dists1, _ = tree2.query(
+            pos1
+        )  # For each point in cluster 1, dist to closest in cluster 2
+        dists2, _ = tree1.query(
+            pos2
+        )  # For each point in cluster 2, dist to closest in cluster 1
 
         # Take points in bottom percentile of distances (closest to contact)
         threshold1 = np.percentile(dists1, BOUNDARY_PERCENTILE)
@@ -113,7 +115,9 @@ def node_distances_through_time(
 
         # Compute mean distance from the selected boundary gaussians
         # This is the mean of the lowest-percentile distances
-        selected_dists = np.concatenate([dists1[boundary_mask1], dists2[boundary_mask2]])
+        selected_dists = np.concatenate(
+            [dists1[boundary_mask1], dists2[boundary_mask2]]
+        )
         mean_min_distance = float(np.mean(selected_dists))
 
         dist_entry = {
@@ -130,44 +134,44 @@ def node_distances_through_time(
     if toolkit is not None and toolkit.recording_active:
         counter = toolkit.increase_logging_tool_counter()
         prefix = f"tool_calls/{counter:02d}_node_distances"
-        
+
         # Get masks for visualization (using original coordinates)
         viz_mask1 = toolkit.clusters == node_id_1
         viz_mask2 = toolkit.clusters == node_id_2
-        
+
         scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
         point_radius = max(scene_extent * 0.008, 1e-5)
-        
+
         for t in range(n_timesteps):
             rr.set_time("timestep", sequence=t)
-            
+
             # Log all points for both clusters with highlight colors
             rr.log(
                 f"{prefix}/node_{node_id_1}",
                 rr.Points3D(
                     positions=toolkit.positions[t][viz_mask1],
                     colors=[[255, 0, 0]],
-                    radii=point_radius
-                )
+                    radii=point_radius,
+                ),
             )
             rr.log(
                 f"{prefix}/node_{node_id_2}",
                 rr.Points3D(
                     positions=toolkit.positions[t][viz_mask2],
                     colors=[[0, 0, 255]],
-                    radii=point_radius
-                )
+                    radii=point_radius,
+                ),
             )
-            
+
             # Compute mean positions of boundary gaussians in original coordinates
             boundary1_orig = toolkit.point_n2o(boundary_points_1[t])
             boundary2_orig = toolkit.point_n2o(boundary_points_2[t])
-            
+
             mean_boundary1 = np.mean(boundary1_orig, axis=0)
             mean_boundary2 = np.mean(boundary2_orig, axis=0)
             midpoint = (mean_boundary1 + mean_boundary2) / 2
             dist = distances[t]["distance"]
-            
+
             # Log distance marker at midpoint
             rr.log(
                 f"{prefix}/distance_marker",
@@ -177,9 +181,9 @@ def node_distances_through_time(
                     radii=point_radius * 1.5,
                     labels=[f"d={dist:.3f}"],
                     show_labels=True,
-                )
+                ),
             )
-            
+
             # Log connection line from mean of boundary gaussians in cluster 1 to cluster 2
             rr.log(
                 f"{prefix}/connection",
@@ -187,7 +191,7 @@ def node_distances_through_time(
                     strips=[[mean_boundary1, mean_boundary2]],
                     colors=[[128, 128, 128]],
                     radii=[point_radius * 0.5],
-                )
+                ),
             )
 
     return {
@@ -228,7 +232,7 @@ def node_overlap_scores_through_time(
     bhattacharyya_coeffs: np.ndarray,
     node_id_1: int,
     node_id_2: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Return the Bhattacharyya coefficients (overlap scores) between two nodes through time.
 
@@ -272,23 +276,23 @@ def node_overlap_scores_through_time(
     if toolkit is not None and toolkit.recording_active:
         counter = toolkit.increase_logging_tool_counter()
         prefix = f"tool_calls/{counter:02d}_node_overlap_scores"
-        
+
         # Get masks for the two nodes
         mask1 = toolkit.clusters == node_id_1
         mask2 = toolkit.clusters == node_id_2
-        
+
         scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
         point_radius = max(scene_extent * 0.008, 1e-5)
-        
+
         for t in range(n_timesteps):
             rr.set_time("timestep", sequence=t)
-            
+
             score = overlap_scores[t]["overlap_score"]
-            
+
             # Color-code nodes based on overlap score (red = low, green = high)
             color_val = int(score * 255)
             node_color = [255 - color_val, color_val, 0]
-            
+
             # Log all points for both clusters with color-coded overlap
             rr.log(
                 f"{prefix}/node_{node_id_1}",
@@ -296,7 +300,7 @@ def node_overlap_scores_through_time(
                     positions=toolkit.positions[t][mask1],
                     colors=[node_color],
                     radii=point_radius,
-                )
+                ),
             )
             rr.log(
                 f"{prefix}/node_{node_id_2}",
@@ -304,9 +308,9 @@ def node_overlap_scores_through_time(
                     positions=toolkit.positions[t][mask2],
                     colors=[node_color],
                     radii=point_radius,
-                )
+                ),
             )
-            
+
             # Log overlap score as text at midpoint
             pos1 = toolkit.centroids[t, node_id_1]
             pos2 = toolkit.centroids[t, node_id_2]
@@ -319,7 +323,7 @@ def node_overlap_scores_through_time(
                     radii=point_radius * 1.5,
                     labels=[f"overlap={score:.3f}"],
                     show_labels=True,
-                )
+                ),
             )
 
     return {
@@ -368,7 +372,7 @@ def node_overlap_position_at_time(
     node_id_1: int,
     node_id_2: int,
     timestep: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Return the point in 3D at which two graph nodes overlap at a given timestep.
 
@@ -415,12 +419,14 @@ def node_overlap_position_at_time(
     overlap_coeff = bhattacharyya_coeffs[timestep, node_id_1, node_id_2]
     if np.isclose(overlap_coeff, 0.0):
         return {
-            "text": json.dumps({
-                "node_id_1": int(node_id_1),
-                "node_id_2": int(node_id_2),
-                "timestep": int(timestep),
-                "message": f"No spatial overlap between node {node_id_1} and node {node_id_2} at timestep {timestep}.",
-            })
+            "text": json.dumps(
+                {
+                    "node_id_1": int(node_id_1),
+                    "node_id_2": int(node_id_2),
+                    "timestep": int(timestep),
+                    "message": f"No spatial overlap between node {node_id_1} and node {node_id_2} at timestep {timestep}.",
+                }
+            )
         }
 
     # Get gaussian indices for each cluster
@@ -460,31 +466,31 @@ def node_overlap_position_at_time(
     if toolkit is not None and toolkit.recording_active:
         counter = toolkit.increase_logging_tool_counter()
         prefix = f"tool_calls/{counter:02d}_t{timestep:02d}_overlap_position"
-        
+
         rr.set_time("timestep", sequence=timestep)
-        
+
         # Use original coordinates for visualization
         mask1 = toolkit.clusters == node_id_1
         mask2 = toolkit.clusters == node_id_2
         pos1_orig = toolkit.positions[timestep, mask1]
         pos2_orig = toolkit.positions[timestep, mask2]
-        
+
         scene_extent = _compute_scene_extent(toolkit.positions[timestep])
         point_radius = max(scene_extent * 0.008, 1e-5)
-        
+
         # Log both nodes
         rr.log(
             f"{prefix}/node_{node_id_1}",
-            rr.Points3D(positions=pos1_orig, colors=[[255, 0, 0]], radii=point_radius)
+            rr.Points3D(positions=pos1_orig, colors=[[255, 0, 0]], radii=point_radius),
         )
         rr.log(
             f"{prefix}/node_{node_id_2}",
-            rr.Points3D(positions=pos2_orig, colors=[[0, 0, 255]], radii=point_radius)
+            rr.Points3D(positions=pos2_orig, colors=[[0, 0, 255]], radii=point_radius),
         )
-        
+
         # Convert contact point back to original coordinates
         contact_point_orig = toolkit.point_n2o(contact_point.reshape(1, 3))[0]
-        
+
         # Log overlap position marker (larger, bright color)
         rr.log(
             f"{prefix}/overlap_position",
@@ -494,7 +500,7 @@ def node_overlap_position_at_time(
                 radii=point_radius * 3,
                 labels=["overlap"],
                 show_labels=True,
-            )
+            ),
         )
 
     return {"text": json.dumps(result)}
@@ -523,7 +529,7 @@ def show_scene_at_timestep(
     video_frames: List[Path],
     annotation_stride: int,
     timestep_idx: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Return the RGB video frame corresponding to a graph timestep.
 
@@ -532,9 +538,7 @@ def show_scene_at_timestep(
     """
     if timestep_idx < 0:
         return {
-            "text": json.dumps(
-                {"error": f"timestep_idx={timestep_idx} must be >= 0"}
-            )
+            "text": json.dumps({"error": f"timestep_idx={timestep_idx} must be >= 0"})
         }
 
     frame_number = int(timestep_idx) * int(annotation_stride)
@@ -597,7 +601,7 @@ spec_node_movement_through_time = {
 def node_movement_through_time(
     centroids: np.ndarray,
     node_id: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Return the node centroid and its movement at each timestep.
 
@@ -667,14 +671,16 @@ def node_movement_through_time(
                     positions=node_positions,
                     colors=[[255, 128, 0]],  # Orange
                     radii=point_radius,
-                )
+                ),
             )
 
     return {
-        "text": json.dumps({
-            "node_id": int(node_id),
-            "movement": movement_data,
-        }),
+        "text": json.dumps(
+            {
+                "node_id": int(node_id),
+                "movement": movement_data,
+            }
+        ),
     }
 
 
@@ -733,7 +739,7 @@ def aggregated_node_movement(
     node_id: int,
     start_timestep: int,
     end_timestep: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Compute centroid_tend - centroid_tstart for a single node.
 
@@ -765,7 +771,9 @@ def aggregated_node_movement(
     if not (0 <= end_timestep < n_timesteps):
         return {
             "text": json.dumps(
-                {"error": f"end_timestep={end_timestep} out of range [0, {n_timesteps})"}
+                {
+                    "error": f"end_timestep={end_timestep} out of range [0, {n_timesteps})"
+                }
             )
         }
 
@@ -819,7 +827,7 @@ def relative_node_movement_through_time(
     centroids: np.ndarray,
     node_id_1: int,
     node_id_2: int,
-    toolkit: Optional['GraphTools'] = None,
+    toolkit: Optional["GraphTools"] = None,
 ) -> Dict[str, Any]:
     """Compute the centroid difference vector between two nodes through time.
 
@@ -852,7 +860,7 @@ def relative_node_movement_through_time(
         c2 = centroids[t, node_id_2]
         # Vector from node 1 to node 2
         diff = c2 - c1
-        
+
         entry = {
             "timestep": t,
             "centroid_difference": {
@@ -868,46 +876,46 @@ def relative_node_movement_through_time(
     if toolkit is not None and toolkit.recording_active:
         counter = toolkit.increase_logging_tool_counter()
         prefix = f"tool_calls/{counter:02d}_relative_movement"
-        
+
         # Get masks for visualization (using original coordinates)
         viz_mask1 = toolkit.clusters == node_id_1
         viz_mask2 = toolkit.clusters == node_id_2
-        
+
         scene_extent = _compute_scene_extent(toolkit.positions.reshape(-1, 3))
         point_radius = max(scene_extent * 0.008, 1e-5)
-        
+
         for t in range(n_timesteps):
             rr.set_time("timestep", sequence=t)
-            
+
             # Log all points for both clusters with highlight colors
             rr.log(
                 f"{prefix}/node_{node_id_1}",
                 rr.Points3D(
                     positions=toolkit.positions[t][viz_mask1],
-                    colors=[[255, 0, 0]], # Red
-                    radii=point_radius
-                )
+                    colors=[[255, 0, 0]],  # Red
+                    radii=point_radius,
+                ),
             )
             rr.log(
                 f"{prefix}/node_{node_id_2}",
                 rr.Points3D(
                     positions=toolkit.positions[t][viz_mask2],
-                    colors=[[0, 0, 255]], # Blue
-                    radii=point_radius
-                )
+                    colors=[[0, 0, 255]],  # Blue
+                    radii=point_radius,
+                ),
             )
-            
+
             # Log connection line between centroids
             c1_orig = toolkit.centroids[t, node_id_1]
             c2_orig = toolkit.centroids[t, node_id_2]
-            
+
             rr.log(
                 f"{prefix}/connection",
                 rr.LineStrips3D(
                     strips=[[c1_orig, c2_orig]],
                     colors=[[255, 255, 255]],
                     radii=[point_radius * 0.5],
-                )
+                ),
             )
 
     return {
@@ -969,7 +977,7 @@ class GraphTools:
         self.point_o2n, self.point_n2o, self.distance_o2n, self.distance_n2o = (
             get_coord_transformations(positions)
         )
-        
+
         # Tool call logging state
         self.call_counter = 0
         self.recording_active = False
@@ -977,28 +985,28 @@ class GraphTools:
 
     def start_recording(self, rrd_file: str):
         """Initialize rerun recording to the specified file and log initial graph state.
-        
+
         Args:
             rrd_file: Path to the .rrd file to save visualizations
         """
         self.call_counter = 0
         self.recording_active = True
-        
+
         # Initialize rerun once globally and only switch output file per query
         global RERUN_INITIALIZED
         if not RERUN_INITIALIZED:
             rr.init("tool_calls")
             RERUN_INITIALIZED = True
         rr.save(rrd_file)
-        
+
         # Log initial graph structure through all timesteps (use original coordinates)
         n_timesteps = self.positions.shape[0]
         scene_extent = _compute_scene_extent(self.positions.reshape(-1, 3))
         point_radius = max(scene_extent * 0.005, 1e-5)
-        
+
         for t in range(n_timesteps):
             rr.set_time("timestep", sequence=t)
-            
+
             for cluster_id in np.unique(self.clusters):
                 mask = self.clusters == cluster_id
                 rr.log(
@@ -1008,17 +1016,17 @@ class GraphTools:
                         radii=point_radius,
                     ),
                 )
-    
+
     def stop_recording(self):
         """Stop recording and reset state."""
         self.recording_active = False
         self.call_counter = 0
-    
+
     def increase_logging_tool_counter(self) -> int:
         """Increment and return the tool call counter."""
         self.call_counter += 1
         return self.call_counter
-    
+
     def log_final_prediction(
         self,
         position: np.ndarray,
@@ -1027,7 +1035,7 @@ class GraphTools:
         entity_name: str = "zz_final_prediction",
     ):
         """Log a final prediction point to the rerun trace.
-        
+
         Args:
             position: 3D position in original coordinates (1, 3) or (3,)
             timestep_idx: Timestep index to log at
@@ -1035,17 +1043,19 @@ class GraphTools:
             entity_name: Entity name for the rerun log (default: "zz_final_prediction")
         """
         from utils.rerun_utils import _compute_scene_extent
-        
+
         # Ensure position is (1, 3) shape
         pos_arr = np.array(position, dtype=np.float32).reshape(1, 3)
-        
+
         # Set the timestep
         self.rr.set_time("timestep", sequence=int(timestep_idx))
-        
+
         # Compute appropriate point size based on scene extent
         scene_extent = _compute_scene_extent(self.positions[timestep_idx])
-        point_radius = max(scene_extent * 0.025, 1e-4)  # Larger than tool points (0.008)
-        
+        point_radius = max(
+            scene_extent * 0.025, 1e-4
+        )  # Larger than tool points (0.008)
+
         # Log the final prediction as a big red point
         self.rr.log(
             entity_name,
@@ -1055,7 +1065,7 @@ class GraphTools:
                 radii=point_radius,
                 labels=[f"prediction: {label}"],
                 show_labels=True,
-            )
+            ),
         )
 
     def get_all_tools(self) -> Dict[str, Tuple[Callable, Dict[str, Any]]]:
@@ -1133,7 +1143,7 @@ class GraphTools:
     ) -> Dict[str, Tuple[Callable, Dict[str, Any]]]:
         """Get a subset of tools by name."""
         tools = self.get_all_tools()
-        assert all(name in tools for name in tool_names), (
-            f"Invalid tool names: {set(tool_names) - set(tools.keys())}"
-        )
+        assert all(
+            name in tools for name in tool_names
+        ), f"Invalid tool names: {set(tool_names) - set(tools.keys())}"
         return {name: tools[name] for name in tool_names}

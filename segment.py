@@ -14,13 +14,14 @@ from tqdm import tqdm
 
 from utils.cholec_utils import get_clip_seg8k, seg8k_endo_watershed_to_class_ids
 
-
 REPO_ROOT = Path(__file__).resolve().parent
 SASVI_ROOT = REPO_ROOT / "submodules" / "SASVi"
 if str(SASVI_ROOT) not in sys.path:
     sys.path.insert(0, str(SASVI_ROOT))
 
-from train_scripts.train_mask2former_cholecseg import train as train_mask2former_cholecseg
+from train_scripts.train_mask2former_cholecseg import (
+    train as train_mask2former_cholecseg,
+)
 from train_scripts.train_maskrcnn_cholecseg import train as train_maskrcnn_cholecseg
 from train_scripts.train_DETR_cholecseg import train as train_detr_cholecseg
 
@@ -52,23 +53,37 @@ def _build_training_root(cfg: DictConfig):
 
     all_clip_dirs = _collect_cholecseg8k_clip_dirs(source_root)
     included_clip_dirs = [
-        clip_dir for clip_dir in all_clip_dirs if clip_dir.name not in excluded_clip_names
+        clip_dir
+        for clip_dir in all_clip_dirs
+        if clip_dir.name not in excluded_clip_names
     ]
 
-    for clip_dir in tqdm(included_clip_dirs, desc="Preparing segment training clips", unit="clip"):
+    for clip_dir in tqdm(
+        included_clip_dirs, desc="Preparing segment training clips", unit="clip"
+    ):
         rel_parent = clip_dir.parent.relative_to(source_root)
         target_clip_dir = train_root / rel_parent / clip_dir.name
         target_clip_dir.mkdir(parents=True, exist_ok=True)
 
         source_files = [path for path in clip_dir.iterdir() if path.is_file()]
-        for source_file in tqdm(source_files, desc=f"Copying files for {clip_dir.name}", unit="file", leave=False):
+        for source_file in tqdm(
+            source_files,
+            desc=f"Copying files for {clip_dir.name}",
+            unit="file",
+            leave=False,
+        ):
             target_file = target_clip_dir / source_file.name
             if target_file.exists():
                 continue
             shutil.copy2(source_file, target_file)
 
         watershed_files = sorted(clip_dir.glob("frame_*_endo_watershed_mask.png"))
-        for watershed_file in tqdm(watershed_files, desc=f"Generating id masks for {clip_dir.name}", unit="mask", leave=False):
+        for watershed_file in tqdm(
+            watershed_files,
+            desc=f"Generating id masks for {clip_dir.name}",
+            unit="mask",
+            leave=False,
+        ):
             frame_id = watershed_file.stem.split("_")[1]
             id_mask_file = target_clip_dir / f"frame_{frame_id}_endo_id_mask.png"
             if id_mask_file.exists():
@@ -82,7 +97,9 @@ def _sync_tree_missing_files(source_root: Path, target_root: Path):
     target_root.mkdir(parents=True, exist_ok=True)
 
     source_files = [path for path in source_root.rglob("*") if path.is_file()]
-    for source_file in tqdm(source_files, desc=f"Syncing files to {target_root}", unit="file"):
+    for source_file in tqdm(
+        source_files, desc=f"Syncing files to {target_root}", unit="file"
+    ):
         rel_path = source_file.relative_to(source_root)
         target_file = target_root / rel_path
         target_file.parent.mkdir(parents=True, exist_ok=True)
@@ -113,22 +130,31 @@ def _sasvi_compatible_frame_stem(frame_idx: int) -> str:
 
 def _resolve_checkpoint(cfg: DictConfig) -> Path:
     if cfg.segment.run_training:
-        checkpoint_path = _latest_experiment_dir(Path(cfg.segment.log_dir)) / cfg.segment.checkpoint_filename
+        checkpoint_path = (
+            _latest_experiment_dir(Path(cfg.segment.log_dir))
+            / cfg.segment.checkpoint_filename
+        )
         checkpoint_path = _as_absolute(str(checkpoint_path))
         if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Resolved training checkpoint does not exist: {checkpoint_path}")
+            raise FileNotFoundError(
+                f"Resolved training checkpoint does not exist: {checkpoint_path}"
+            )
         return checkpoint_path
 
     checkpoint_path = Path(cfg.segment.checkpoint_path)
     if "latest" in checkpoint_path.parts or "[latest]" in checkpoint_path.parts:
         latest_dir = _latest_experiment_dir(Path(cfg.segment.log_dir))
         latest_token = "latest" if "latest" in checkpoint_path.parts else "[latest]"
-        suffix_after_latest = checkpoint_path.parts[checkpoint_path.parts.index(latest_token) + 1 :]
+        suffix_after_latest = checkpoint_path.parts[
+            checkpoint_path.parts.index(latest_token) + 1 :
+        ]
         checkpoint_path = latest_dir / Path(*suffix_after_latest)
 
     checkpoint_path = _as_absolute(str(checkpoint_path))
     if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Resolved inference checkpoint does not exist: {checkpoint_path}")
+        raise FileNotFoundError(
+            f"Resolved inference checkpoint does not exist: {checkpoint_path}"
+        )
     return checkpoint_path
 
 
@@ -181,7 +207,9 @@ def _train_overseer(cfg: DictConfig):
             num_queries=cfg.segment.num_queries,
         )
     else:
-        raise ValueError(f"Unsupported overseer type for training: {cfg.segment.sasvi.overseer_type}")
+        raise ValueError(
+            f"Unsupported overseer type for training: {cfg.segment.sasvi.overseer_type}"
+        )
 
 
 def _prepare_sasvi_base_video_dir(cfg: DictConfig):
@@ -273,7 +301,9 @@ def _convert_sasvi_outputs_to_numpy_masks(cfg: DictConfig):
         )
 
         sasvi_clip_dir = output_mask_dir / clip.name
-        preprocessed_sem_dir = Path(cfg.preprocessed_root) / clip.name / cfg.segment.prediction_subdir
+        preprocessed_sem_dir = (
+            Path(cfg.preprocessed_root) / clip.name / cfg.segment.prediction_subdir
+        )
         if preprocessed_sem_dir.exists():
             shutil.rmtree(preprocessed_sem_dir)
         preprocessed_sem_dir.mkdir(parents=True, exist_ok=False)

@@ -37,9 +37,9 @@ def center_crop_divisible(
         np.ndarray: Center cropped array with each dimension being divisible by 'k'
     """
     assert k > 0, "k must be > 0"
-    assert (np.array(arr.shape[: -1 if skip_last_dim else None]) >= k).all(), (
-        "All dimensions must be at least k"
-    )
+    assert (
+        np.array(arr.shape[: -1 if skip_last_dim else None]) >= k
+    ).all(), "All dimensions must be at least k"
 
     crop_slices = []
     for dim_size in arr.shape[: -1 if skip_last_dim else None]:
@@ -118,7 +118,9 @@ def _load_and_translate_spatial_labels(
     top, bottom, left, right = crop_box
     cropped_h = bottom - top
     cropped_w = right - left
-    off_y, off_x = _compute_center_crop_offsets(cropped_h, cropped_w, cfg.preprocess.frames_divisor)
+    off_y, off_x = _compute_center_crop_offsets(
+        cropped_h, cropped_w, cfg.preprocess.frames_divisor
+    )
     final_h = cropped_h - 2 * off_y
     final_w = cropped_w - 2 * off_x
 
@@ -130,10 +132,12 @@ def _load_and_translate_spatial_labels(
         x_orig, y_orig = annotation.get("pil_coords")
         x_new = int(x_orig - left - off_x)
         y_new = int(y_orig - top - off_y)
-        
+
         # Skip if out of bounds
         if not (0 <= x_new < final_w and 0 <= y_new < final_h):
-            print(f"Skipping annotation {clip.name} {annotation['id']} because it's out of bounds")
+            print(
+                f"Skipping annotation {clip.name} {annotation['id']} because it's out of bounds"
+            )
             continue
 
         # Create translated annotation
@@ -147,7 +151,9 @@ def _load_and_translate_spatial_labels(
         translated_annotations.append(new_annotation)
 
         # For visualization
-        per_frame_points.setdefault(int(annotation["timestep"] * cfg.preprocess.annotation_stride), []).append((x_new, y_new, new_annotation["query"], "spatial"))
+        per_frame_points.setdefault(
+            int(annotation["timestep"] * cfg.preprocess.annotation_stride), []
+        ).append((x_new, y_new, new_annotation["query"], "spatial"))
 
     translated = {"annotations": translated_annotations}
 
@@ -234,7 +240,9 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
     )
 
     # estimate crops to remove black borders from first GT semantic mask
-    first_class_ids = seg8k_endo_watershed_to_class_ids(Image.open(semantic_mask_files[0]))
+    first_class_ids = seg8k_endo_watershed_to_class_ids(
+        Image.open(semantic_mask_files[0])
+    )
 
     top, bottom, left, right = estimate_crop_box(first_class_ids)
 
@@ -328,12 +336,8 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
                 cv2.cvtColor(out_inst, cv2.COLOR_RGB2BGR),
             )
 
-
         # Optional visualization of labels on preprocessed frames
-        if (
-            cfg.preprocess.dump_label_visualizations
-            and new_frame_id in viz_points
-        ):
+        if cfg.preprocess.dump_label_visualizations and new_frame_id in viz_points:
             viz_dir = clip_dir / cfg.preprocess.label_viz_subdir
             img_viz = _render_label_visualization(rgb, viz_points[new_frame_id])
             cv2.imwrite(

@@ -11,6 +11,7 @@ from omegaconf import DictConfig
 
 from benchmark.graph_utils import get_coord_transformations
 from benchmark.serialization_utils import parse_json, sanitize_tool_calls
+
 # from llm.qwen_utils import (
 #     prompt_graph_agent_with_semantic_labels,
 #     prompt_with_video,
@@ -35,25 +36,25 @@ def multiframe_directional_queries(
     model,
     processor,
     video_frames: List[Path],
-    graph_path: Path, # mock
+    graph_path: Path,  # mock
     annotations: List[Dict[str, Any]],
-    clip: DictConfig, # mock
+    clip: DictConfig,  # mock
     cfg: DictConfig,
-    use_semantic_labels: bool = False, # mock
-    semantic_method_name: str = "", # mock
+    use_semantic_labels: bool = False,  # mock
+    semantic_method_name: str = "",  # mock
     use_masks: bool = False,
 ) -> List[Dict[str, Any]]:
-    sampled_frames = video_frames[::cfg.eval.annotation_stride]
+    sampled_frames = video_frames[:: cfg.eval.annotation_stride]
     effective_fps = cfg.eval.video_fps / cfg.eval.annotation_stride
     if use_masks:
         system_prompt = cfg.eval.directional.multiframe_masks_system_prompt
         prompt_template = cfg.eval.directional.multiframe_masks_prompt_template
         overlay_dir = (
-            Path(cfg.preprocessed_root)
-            / clip.name
-            / cfg.eval.paths.overlay_subdir
+            Path(cfg.preprocessed_root) / clip.name / cfg.eval.paths.overlay_subdir
         )
-        sampled_frames = [overlay_dir / f"{frame_path.stem}.png" for frame_path in sampled_frames]
+        sampled_frames = [
+            overlay_dir / f"{frame_path.stem}.png" for frame_path in sampled_frames
+        ]
     else:
         system_prompt = cfg.eval.directional.multiframe_system_prompt
         prompt_template = cfg.eval.directional.multiframe_prompt_template
@@ -83,7 +84,12 @@ def multiframe_directional_queries(
         )
 
         json_data = parse_json(response)
-        if json_data is None or "x" not in json_data or "y" not in json_data or "z" not in json_data:
+        if (
+            json_data is None
+            or "x" not in json_data
+            or "y" not in json_data
+            or "z" not in json_data
+        ):
             prediction = None
         else:
             x_class = _parse_axis_class(json_data["x"])
@@ -156,10 +162,14 @@ def graph_agent_directional_queries(
     point_o2n, _, distance_o2n, _ = get_coord_transformations(positions)
 
     if semantic_method_name == "graph_agent_semantics_vision":
-        max_iterations = cfg.eval.directional.graph_agent_semantics_vision_max_iterations
+        max_iterations = (
+            cfg.eval.directional.graph_agent_semantics_vision_max_iterations
+        )
         tool_config = cfg.eval.directional.graph_agent_semantics_vision_tools
         system_prompt = cfg.eval.directional.graph_agent_semantics_vision_system_prompt
-        prompt_template = cfg.eval.directional.graph_agent_semantics_vision_prompt_template
+        prompt_template = (
+            cfg.eval.directional.graph_agent_semantics_vision_prompt_template
+        )
     elif semantic_method_name == "graph_agent_semantics":
         max_iterations = cfg.eval.directional.graph_agent_semantics_max_iterations
         tool_config = cfg.eval.directional.graph_agent_semantics_tools
@@ -210,7 +220,9 @@ def graph_agent_directional_queries(
             sanitized_question = re.sub(r"[^\w\s-]", "", query)
             sanitized_question = re.sub(r"\s+", "_", sanitized_question)
             sanitized_question = sanitized_question[:50]
-            rrd_file = tool_viz_dir / f"{method_name}_{query_id}_{sanitized_question}.rrd"
+            rrd_file = (
+                tool_viz_dir / f"{method_name}_{query_id}_{sanitized_question}.rrd"
+            )
             graph_tools.start_recording(str(rrd_file))
 
         num_ts = graph_tools.adjacency.shape[0]
@@ -242,7 +254,12 @@ def graph_agent_directional_queries(
             graph_tools.stop_recording()
 
         json_data = parse_json(agent_result["final_answer"])
-        if json_data is None or "x" not in json_data or "y" not in json_data or "z" not in json_data:
+        if (
+            json_data is None
+            or "x" not in json_data
+            or "y" not in json_data
+            or "z" not in json_data
+        ):
             prediction = None
         else:
             x_class = _parse_axis_class(json_data["x"])

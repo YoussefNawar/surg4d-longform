@@ -39,14 +39,16 @@ def evaluate_temporal(
     """
     if cfg.eval is None or cfg.eval.temporal is None:
         return
-    
+
     video_dir = Path(cfg.preprocessed_root) / str(clip.name)
     graph_path = Path(cfg.output_root) / str(clip.name) / cfg.eval.paths.graph_subdir
-    
+
     video_frames, _ = load_video_frames(video_dir, cfg.eval.paths.images_subdir)
-    
+
     # load annotations
-    temporal_anno_file = Path(cfg.eval.annotations_root) / "temporal" / f"{clip.name}.json"
+    temporal_anno_file = (
+        Path(cfg.eval.annotations_root) / "temporal" / f"{clip.name}.json"
+    )
     with open(temporal_anno_file) as f:
         temporal_data = json.load(f)
     annotations = temporal_data["annotations"]
@@ -58,14 +60,14 @@ def evaluate_temporal(
         "graph_agent_semantics": graph_agent_queries,
         "graph_agent_semantics_vision": graph_agent_queries,
     }
-    
+
     # Collect predictions for all methods specified in config
     all_results = {}
-    
+
     for method_name in cfg.eval.temporal.methods:
         if method_name not in method_map:
             continue
-        
+
         strategy_fn = method_map[method_name]
         kwargs = {
             "model": model,
@@ -75,7 +77,8 @@ def evaluate_temporal(
             "annotations": annotations,
             "clip": clip,
             "cfg": cfg,
-            "use_semantic_labels": method_name in {"graph_agent_semantics", "graph_agent_semantics_vision"},
+            "use_semantic_labels": method_name
+            in {"graph_agent_semantics", "graph_agent_semantics_vision"},
             "semantic_method_name": method_name,
         }
         if method_name in {"multiframe", "multiframe_masks"}:
@@ -85,11 +88,11 @@ def evaluate_temporal(
             **kwargs,
         )
         all_results[method_name] = results
-        
+
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    
+
     # Convert to prediction dump format
     preds_by_method: dict[str, list[dict]] = {}
     for method_name, results in all_results.items():
@@ -105,7 +108,7 @@ def evaluate_temporal(
             }
             for r in results
         ]
-    
+
     # Save per-clip predictions for compute_metrics stage
     pred_out_dir = Path(cfg.eval.temporal.output_dir)
     pred_out_dir.mkdir(parents=True, exist_ok=True)
@@ -272,7 +275,9 @@ def evaluate_directional(
 
     video_frames, _ = load_video_frames(video_dir, cfg.eval.paths.images_subdir)
 
-    directional_anno_file = Path(cfg.eval.annotations_root) / "directional" / f"{clip.name}.json"
+    directional_anno_file = (
+        Path(cfg.eval.annotations_root) / "directional" / f"{clip.name}.json"
+    )
     with open(directional_anno_file) as f:
         directional_data = json.load(f)
     annotations = directional_data["annotations"]
@@ -298,7 +303,8 @@ def evaluate_directional(
             "annotations": annotations,
             "clip": clip,
             "cfg": cfg,
-            "use_semantic_labels": method_name in {"graph_agent_semantics", "graph_agent_semantics_vision"},
+            "use_semantic_labels": method_name
+            in {"graph_agent_semantics", "graph_agent_semantics_vision"},
             "semantic_method_name": method_name,
         }
         if method_name in {"multiframe", "multiframe_masks"}:
@@ -365,12 +371,16 @@ def main(cfg: DictConfig):
 
     for clip in tqdm(cfg.clips, desc="Evaluating clips", unit="clip"):
         evaluate_temporal(
-            clip=clip, cfg=cfg,
-            model=model, processor=processor,
+            clip=clip,
+            cfg=cfg,
+            model=model,
+            processor=processor,
         )
         evaluate_spatial(
-            clip=clip, cfg=cfg,
-            model=model, processor=processor,
+            clip=clip,
+            cfg=cfg,
+            model=model,
+            processor=processor,
         )
         evaluate_directional(
             clip=clip,
@@ -378,6 +388,7 @@ def main(cfg: DictConfig):
             model=model,
             processor=processor,
         )
+
 
 if __name__ == "__main__":
     main()

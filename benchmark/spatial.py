@@ -12,6 +12,7 @@ from PIL import Image
 
 from benchmark.graph_utils import get_coord_transformations
 from benchmark.serialization_utils import sanitize_tool_calls, parse_json
+
 # from llm.qwen_utils import (
 #     prompt_with_image,
 #     prompt_graph_agent_with_semantic_labels,
@@ -71,16 +72,17 @@ def load_da3_projection_data(
 
     return intrinsic_matrices, w2c_matrices, w, h
 
+
 def qwen3_coords_to_pixels(
     x: float, y: float, img_width: int, img_height: int
 ) -> np.ndarray:
     """Convert Qwen3's normalized [0, 1000] coordinates back to pixel coordinates.
-    
+
     Args:
         coords: Array of shape (N, 2) with [x, y] in [0, 1000] range
         img_width: Original image width in pixels
         img_height: Original image height in pixels
-    
+
     Returns:
         Array of shape (N, 2) with [x, y] pixel coordinates
     """
@@ -146,7 +148,9 @@ def graph_agent_feat_queries(
 
     # Create GraphTools instance for tool management
     images_dir = Path(cfg.preprocessed_root) / clip.name / cfg.eval.paths.images_subdir
-    video_frames = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
+    video_frames = sorted(
+        list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png"))
+    )
 
     graph_tools = GraphTools(
         positions=positions,
@@ -176,10 +180,10 @@ def graph_agent_feat_queries(
         max_calls = getattr(tool_entry, "max_calls", None)
         if max_calls is not None:
             tool_call_limits[tool_name] = max_calls
-    
+
     # Get the specific tools needed for graph agent
     tools = graph_tools.get_tools_by_name(tool_names)
-    
+
     # Convert to None if no limits specified
     if len(tool_call_limits) == 0:
         tool_call_limits = None
@@ -203,13 +207,17 @@ def graph_agent_feat_queries(
         w2c_matrix = w2c_matrices[int(frame_number)]
         question = annotation["query"]
         prompt = prompt_template.format(question=question)
-        
+
         # start recording tool calls
         if tool_viz_dir is not None and graph_tools is not None:
-            sanitized_query = re.sub(r'[^\w\s-]', '', question)  # Remove special chars
-            sanitized_query = re.sub(r'\s+', '_', sanitized_query)  # Replace whitespace with _
+            sanitized_query = re.sub(r"[^\w\s-]", "", question)  # Remove special chars
+            sanitized_query = re.sub(
+                r"\s+", "_", sanitized_query
+            )  # Replace whitespace with _
             sanitized_query = sanitized_query[:50]  # Limit length
-            rrd_filename = f"{method_name}_t{timestep:03d}_{query_id}_{sanitized_query}.rrd"
+            rrd_filename = (
+                f"{method_name}_t{timestep:03d}_{query_id}_{sanitized_query}.rrd"
+            )
             rrd_file = tool_viz_dir / rrd_filename
             graph_tools.start_recording(str(rrd_file))
 
@@ -230,7 +238,12 @@ def graph_agent_feat_queries(
 
         # parse and convert to pixels
         json_data = parse_json(agent_result["final_answer"])
-        if json_data is None or "x" not in json_data or "y" not in json_data or "z" not in json_data:
+        if (
+            json_data is None
+            or "x" not in json_data
+            or "y" not in json_data
+            or "z" not in json_data
+        ):
             px, py = None, None
             pos_arr_original = None
             if tool_viz_dir is not None and graph_tools is not None:
@@ -254,16 +267,22 @@ def graph_agent_feat_queries(
             pixels = project_3d_to_2d(pos_arr_original, intrinsic_matrix, w2c_matrix)
             px, py = float(pixels[0, 0]), float(pixels[0, 1])
 
-        results.append({
-            "id": query_id,
-            "timestep": timestep,
-            "query": question,
-            "predicted": [px, py],
-            "predicted_3d_original": pos_arr_original.tolist() if pos_arr_original is not None else [None, None, None],
-            "raw_response": agent_result["final_answer"],
-            "message_history": agent_result["message_history"],
-            "tool_calls": sanitize_tool_calls(agent_result.get("tool_calls", [])),
-        })
+        results.append(
+            {
+                "id": query_id,
+                "timestep": timestep,
+                "query": question,
+                "predicted": [px, py],
+                "predicted_3d_original": (
+                    pos_arr_original.tolist()
+                    if pos_arr_original is not None
+                    else [None, None, None]
+                ),
+                "raw_response": agent_result["final_answer"],
+                "message_history": agent_result["message_history"],
+                "tool_calls": sanitize_tool_calls(agent_result.get("tool_calls", [])),
+            }
+        )
 
         # Clear VRAM after each timestep to prevent OOM
         gc.collect()
@@ -330,16 +349,18 @@ def frame_direct_feat_queries(
             px, py = qwen3_coords_to_pixels(x, y, image.width, image.height)
             px, py = float(px), float(py)
 
-        results.append({
-            "id": query_id,
-            "timestep": timestep,
-            "query": annotation["query"],
-            "predicted": [px, py],
-            "predicted_qwen3coords": [x, y],
-            "raw_response": response,
-            "message_history": [],
-            "tool_calls": [],
-        })
+        results.append(
+            {
+                "id": query_id,
+                "timestep": timestep,
+                "query": annotation["query"],
+                "predicted": [px, py],
+                "predicted_qwen3coords": [x, y],
+                "raw_response": response,
+                "message_history": [],
+                "tool_calls": [],
+            }
+        )
 
         # Clear VRAM after each timestep to prevent OOM
         gc.collect()

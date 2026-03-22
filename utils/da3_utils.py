@@ -18,41 +18,41 @@ def filter_depth_edge_artifacts(
 ) -> np.ndarray:
     """
     Filter edge floaters in depth maps by masking pixels with high depth gradients.
-    
+
     Edge floaters occur when depth changes drastically at object boundaries, causing
     intermediate depth values between foreground and background. This function detects
     such regions by computing depth gradients and masking pixels where the absolute
     gradient exceeds a threshold.
-    
+
     Args:
         depth: Depth map of shape (H, W) in meters (DA3 metric output)
         gradient_threshold: Absolute gradient threshold in meters per pixel.
             Pixels with gradient above this are masked. Default 0.05 means
             depth changes > 5cm per pixel are filtered.
         kernel_size: Size of Sobel kernel for gradient computation (must be 1, 3, 5, or 7)
-    
+
     Returns:
         Filtered depth map of same shape, with edge artifacts set to 0 (invalid)
     """
     if depth.ndim != 2:
         raise ValueError(f"Expected 2D depth map, got shape {depth.shape}")
-    
+
     # Compute depth gradients using Sobel operators (meters per pixel)
     grad_x = cv2.Sobel(depth, cv2.CV_64F, 1, 0, ksize=kernel_size)
     grad_y = cv2.Sobel(depth, cv2.CV_64F, 0, 1, ksize=kernel_size)
     grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-    
+
     # Mask pixels where absolute gradient exceeds threshold
     # These are likely edge floaters (sharp depth discontinuities)
     valid_mask = grad_magnitude <= gradient_threshold
-    
+
     # Preserve original valid depth pixels (depth > 0)
     valid_mask = valid_mask & (depth > 0)
-    
+
     # Apply mask: set invalid pixels to 0
     filtered_depth = depth.copy()
     filtered_depth[~valid_mask] = 0.0
-    
+
     return filtered_depth
 
 
@@ -62,20 +62,20 @@ def filter_prediction_edge_artifacts(
 ) -> Prediction:
     """
     Filter edge artifacts from a DA3 prediction object by modifying depth maps in-place.
-    
+
     This function applies edge filtering to all depth maps in the prediction at processed
     resolution. The filtered prediction can then be used for point cloud generation and
     saving to disk (where it will just be resized).
-    
+
     Args:
         prediction: DA3 Prediction object with depth maps at processed resolution
         gradient_threshold: Relative gradient threshold for filtering edge floaters
-    
+
     Returns:
         The same prediction object with filtered depth maps (modified in-place)
     """
     num_frames = len(prediction.depth)
-    
+
     for frame_idx in range(num_frames):
         depth_2d = prediction.depth[frame_idx]  # (H, W)
         depth_filtered = filter_depth_edge_artifacts(
@@ -84,7 +84,7 @@ def filter_prediction_edge_artifacts(
         )
         # Modify in-place
         prediction.depth[frame_idx] = depth_filtered
-    
+
     return prediction
 
 
@@ -102,7 +102,7 @@ def da3_to_multi_view_colmap(
     Export COLMAP format with points from multiple views (e.g., first, middle, last).
     All cameras/images are still added, but only the selected views have point observations.
     Points from different views are simply concatenated (may have duplicates in overlapping regions).
-    
+
     Args:
         prediction: DepthAnything3 prediction object
         export_dir: Directory to export COLMAP files
@@ -141,7 +141,7 @@ def da3_to_multi_view_colmap(
             view_depth = view_depth[:, ::pixel_stride, ::pixel_stride]
             view_conf = view_conf[:, ::pixel_stride, ::pixel_stride]
             view_images = view_images[:, ::pixel_stride, ::pixel_stride, :]
-            
+
             # Adjust intrinsics for subsampled resolution
             view_intrinsics = view_intrinsics.copy()
             view_intrinsics[:, 0, 0] /= pixel_stride  # fx
@@ -161,11 +161,14 @@ def da3_to_multi_view_colmap(
 
         rr.set_time_sequence("frame", view_idx)
 
-        rr.log("world/original_points", rr.Points3D(
-            positions=points,
-            colors=colors,
-            radii=0.001,
-        ))
+        rr.log(
+            "world/original_points",
+            rr.Points3D(
+                positions=points,
+                colors=colors,
+                radii=0.001,
+            ),
+        )
 
         num_points_init = len(points)
         num_points_to_add = num_points_init * (densify_ratio - 1)
@@ -175,21 +178,27 @@ def da3_to_multi_view_colmap(
         # Tile copies blockwise, so [p0, p1, p2] -> [p0, p1, p2, p0, p1, p2, ...]
         random_points = np.tile(points, (densify_ratio - 1, 1)) + random_noise
         additional_colors = np.tile(colors, (densify_ratio - 1, 1))
-        rr.log("world/additional_points", rr.Points3D(
-            positions=random_points,
-            colors=additional_colors,
-            radii=0.001,
-        ))
+        rr.log(
+            "world/additional_points",
+            rr.Points3D(
+                positions=random_points,
+                colors=additional_colors,
+                radii=0.001,
+            ),
+        )
 
         points = np.concatenate([points, random_points], axis=0)
         colors = np.tile(colors, (densify_ratio, 1))
 
-        rr.log("world/final_points", rr.Points3D(
-            positions=points,
-            colors=colors,
-            radii=0.001,
-        ))
-        
+        rr.log(
+            "world/final_points",
+            rr.Points3D(
+                positions=points,
+                colors=colors,
+                radii=0.001,
+            ),
+        )
+
         # Get the actual height and width after subsampling
         h_subsampled, w_subsampled = view_depth.shape[1:3]
 
@@ -230,7 +239,9 @@ def da3_to_multi_view_colmap(
             intrinsic[:1] *= orig_w / w
             intrinsic[1:2] *= orig_h / h
         elif process_res_method == "crop":
-            raise NotImplementedError("COLMAP export for crop method is not implemented")
+            raise NotImplementedError(
+                "COLMAP export for crop method is not implemented"
+            )
         else:
             raise ValueError(f"Unknown process_res_method: {process_res_method}")
 
@@ -257,7 +268,9 @@ def da3_to_multi_view_colmap(
     point3d_ids = []
     for vidx in range(num_points):
         track = pycolmap.Track()
-        point3d_id = reconstruction.add_point3D(all_points[vidx], track, all_colors[vidx])
+        point3d_id = reconstruction.add_point3D(
+            all_points[vidx], track, all_colors[vidx]
+        )
         point3d_ids.append(point3d_id)
 
     # Now add images with point2d observations
@@ -294,17 +307,17 @@ def da3_to_multi_view_colmap(
             view_list_idx = view_indices.index(fidx)
             points_xyf_view = all_points_xyf[view_list_idx]
             num_points_view = view_point_counts[view_list_idx]
-            
+
             # Calculate the offset into all_points for this view
             view_point_offset = sum(view_point_counts[:view_list_idx])
-            
+
             # Get subsampled dimensions for this view
             if pixel_stride > 1:
                 h_subsampled = prediction.depth.shape[1] // pixel_stride
                 w_subsampled = prediction.depth.shape[2] // pixel_stride
             else:
                 h_subsampled, w_subsampled = h, w
-            
+
             point2d_list = []
             for vidx in range(num_points_view):
                 point2d = points_xyf_view[vidx][:2].copy()
@@ -329,7 +342,7 @@ def da3_to_multi_view_colmap(
 
     # 3. Export
     reconstruction.write(export_dir)
-    
+
     return view_point_counts  # Return counts for downstream use
 
 
@@ -345,7 +358,7 @@ def da3_to_single_view_colmap(
     """
     Export COLMAP format with points only from a single view.
     All cameras/images are still added, but only the selected view has point observations.
-    
+
     Args:
         pixel_stride: Stride for subsampling pixels (e.g., 3 = every 3rd pixel = 1/9 points)
     """
@@ -365,7 +378,7 @@ def da3_to_single_view_colmap(
         single_depth = single_depth[:, ::pixel_stride, ::pixel_stride]
         single_conf = single_conf[:, ::pixel_stride, ::pixel_stride]
         single_images = single_images[:, ::pixel_stride, ::pixel_stride, :]
-        
+
         # Adjust intrinsics for subsampled resolution
         single_intrinsics = single_intrinsics.copy()
         # Scale focal lengths and principal point by the stride
@@ -393,7 +406,9 @@ def da3_to_single_view_colmap(
 
     # Create xyf mapping only for the single view
     # Reshape to match the filtering used in _depths_to_world_points_with_colors
-    points_xyf_single = _create_xyf(1, h_subsampled, w_subsampled)  # Shape: (1, h, w, 3)
+    points_xyf_single = _create_xyf(
+        1, h_subsampled, w_subsampled
+    )  # Shape: (1, h, w, 3)
     points_xyf_single = points_xyf_single.reshape(-1, 3)  # Shape: (h*w, 3)
     # Filter by confidence (same as in _depths_to_world_points_with_colors)
     valid_mask = (

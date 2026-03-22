@@ -34,7 +34,6 @@ def timestep_to_seconds_str(timestep: int, fps: float) -> str:
     return f'time="<{seconds:.1f} seconds>"'
 
 
-
 def get_qwen3(
     size: Literal["8B", "32B"] = "8B",
     use_fp8: bool = False,
@@ -75,7 +74,6 @@ def get_qwen3(
     return model, processor
 
 
-
 def _set_generation_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -110,7 +108,7 @@ def prompt_with_image(
             ],
         },
     ]
-    text = processor.apply_chat_template(  # type:ignore
+    text = processor.apply_chat_template(  # type: ignore
         messages, tokenize=False, add_generation_prompt=True
     )
     inputs = processor(
@@ -659,12 +657,12 @@ def prompt_graph_agent_with_semantic_labels(
     max_thinking_tokens: int - maximum tokens for thinking phase per iteration (Qwen3 only).
         If None, no limit is applied. If 0, thinking is disabled immediately.
     """
-    assert tools is not None and len(tools) > 0, (
-        "tools are required for graph agentic prompting"
-    )
-    assert len(node_centers) == len(node_centroids) == len(node_extents), (
-        "timestep mismatch"
-    )
+    assert (
+        tools is not None and len(tools) > 0
+    ), "tools are required for graph agentic prompting"
+    assert (
+        len(node_centers) == len(node_centroids) == len(node_extents)
+    ), "timestep mismatch"
 
     # node feat indices correspond to cluster ids
     centroids = node_centroids[initial_timestep_idx]

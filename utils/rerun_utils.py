@@ -21,6 +21,7 @@ def _compute_scene_extent(positions: np.ndarray) -> float:
         return 1.0
     return float(extent)
 
+
 def log_points_through_time(
     clusters: np.ndarray,
     cluster_colors: np.ndarray,
@@ -79,7 +80,7 @@ def log_points_through_time(
                     mean_labels.append(f"Semantic: {semantic_labels[c]}")
                 else:
                     mean_labels.append(None)
-        
+
         means_viz = rr.Points3D(
             positions=cluster_means,
             colors=mean_colors,
@@ -198,6 +199,7 @@ def log_correspondences_static(
 # Spatial grounding visualizers
 # =============================
 
+
 def _colorize_values(values: np.ndarray, cmap_name: str) -> np.ndarray:
     """Map scalar values to RGB colors in [0,255] using a colormap with per-vector min-max normalization."""
     vmin = float(values.min())
@@ -296,8 +298,7 @@ def log_spatial_grounding_heatmaps(
     rr.log(
         f"{base_path}/tokens",
         rr.TextLog(
-            text=f"query_token_indices={query_token_indices}\n" +
-                 f"tokens: {tokens}"
+            text=f"query_token_indices={query_token_indices}\n" + f"tokens: {tokens}"
         ),
     )
 
@@ -376,7 +377,9 @@ def log_spatial_predictions(
         )
 
         # Support only grouped (dict with objects/actions) format
-        assert isinstance(queries, dict), "log_spatial_predictions expects grouped results (dict with 'objects' and 'actions')."
+        assert isinstance(
+            queries, dict
+        ), "log_spatial_predictions expects grouped results (dict with 'objects' and 'actions')."
         log_spatial_query_group(
             base_path=base_path,
             clip_name=clip_name,
@@ -407,6 +410,7 @@ def log_spatial_query_group(
     prefix = f"{base_path}/{clip_name}/t{int(timestep_int):06d}/"
     if group_name:
         prefix = f"{prefix}{group_name}/"
+
     def _sanitize_segment(seg: str) -> str:
         seg = seg.strip()
         seg = re.sub(r"\s+", "_", seg)
@@ -435,7 +439,7 @@ def log_spatial_query_group(
 
 def _generate_instance_colors(unique_instances: np.ndarray, seed: int = 42) -> dict:
     """Generate random distinct colors for each instance ID.
-    
+
     Uses seeded random for reproducibility. Colors are saturated and bright.
     """
     rng = np.random.default_rng(seed)
@@ -470,7 +474,7 @@ def log_merged_instances(
     timesteps: np.ndarray,
 ):
     """Log merged instance assignments as colored pointclouds through time.
-    
+
     Args:
         merged_instance_ids: (N_total,) array of merged instance IDs
         positions_through_time: (T, N_total, 3) array of positions through time
@@ -479,28 +483,28 @@ def log_merged_instances(
     # Get unique instance IDs (excluding background)
     unique_instances = np.unique(merged_instance_ids)
     unique_instances = unique_instances[unique_instances > 0]
-    
+
     # Generate distinct colors for each instance
     color_map = _generate_instance_colors(unique_instances, seed=42)
-    
+
     # Create color mapping
     instance_colors = np.zeros((len(merged_instance_ids), 3), dtype=np.uint8)
     for inst_id in unique_instances:
         mask = merged_instance_ids == inst_id
         instance_colors[mask] = color_map[inst_id]
-    
+
     # Background gets white (clearly distinct from saturated instance colors)
     background_mask = merged_instance_ids <= 0
     instance_colors[background_mask] = [255, 255, 255]
-    
+
     # Log through time
     for t_idx, timestep in enumerate(timesteps):
         rr.set_time("timestep", sequence=int(timestep))
         pos = positions_through_time[t_idx]  # (N_total, 3)
-        
+
         scene_extent = _compute_scene_extent(pos)
         point_radius = max(scene_extent * 0.006, 1e-5)
-        
+
         # Log all merged points
         rr.log(
             "merged/all_points",
@@ -510,7 +514,7 @@ def log_merged_instances(
                 radii=point_radius,
             ),
         )
-        
+
         # Log individual merged instances
         for inst_id in unique_instances:
             mask = merged_instance_ids == inst_id
@@ -525,7 +529,7 @@ def log_merged_instances(
                         radii=point_radius,
                     ),
                 )
-        
+
         # Log background
         if background_mask.sum() > 0:
             bg_pos = pos[background_mask]
@@ -544,10 +548,10 @@ def log_per_view_instances(
     timesteps: np.ndarray,
 ):
     """Log per-view instance assignments as colored pointclouds through time.
-    
+
     Each view gets separate pointclouds, with one color per instance ID.
     Background (instance_id = -1 or 0) is shown in white.
-    
+
     Args:
         per_view_data: List of dicts, each containing:
             - frame_idx: Init frame index for this view
@@ -559,32 +563,36 @@ def log_per_view_instances(
         frame_idx = view_data["frame_idx"]
         instance_ids = view_data["instance_ids"].numpy()  # (N_view,)
         positions_through_time = view_data["positions"].numpy()  # (T, N_view, 3)
-        
+
         # Get unique instance IDs (excluding background)
         unique_instances = np.unique(instance_ids)
-        unique_instances = unique_instances[unique_instances > 0]  # Exclude background (-1, 0)
-        
+        unique_instances = unique_instances[
+            unique_instances > 0
+        ]  # Exclude background (-1, 0)
+
         # Generate distinct colors for each instance (use view_idx as seed offset for variety between views)
-        color_map = _generate_instance_colors(unique_instances, seed=42 + view_idx * 1000)
-        
+        color_map = _generate_instance_colors(
+            unique_instances, seed=42 + view_idx * 1000
+        )
+
         # Create color mapping: each instance gets a unique color
         instance_colors = np.zeros((len(instance_ids), 3), dtype=np.uint8)
         for inst_id in unique_instances:
             mask = instance_ids == inst_id
             instance_colors[mask] = color_map[inst_id]
-        
+
         # Background gets white (clearly distinct from saturated instance colors)
-        background_mask = (instance_ids <= 0)
+        background_mask = instance_ids <= 0
         instance_colors[background_mask] = [255, 255, 255]
-        
+
         # Log through time
         for t_idx, timestep in enumerate(timesteps):
             rr.set_time("timestep", sequence=int(timestep))
             pos = positions_through_time[t_idx]  # (N_view, 3)
-            
+
             scene_extent = _compute_scene_extent(pos)
             point_radius = max(scene_extent * 0.006, 1e-5)
-            
+
             # Log all points for this view
             rr.log(
                 f"per_view/view_{view_idx}_frame_{frame_idx}/all_points",
@@ -594,7 +602,7 @@ def log_per_view_instances(
                     radii=point_radius,
                 ),
             )
-            
+
             # Log individual instances as separate pointclouds
             for inst_id in unique_instances:
                 mask = instance_ids == inst_id
@@ -609,7 +617,7 @@ def log_per_view_instances(
                             radii=point_radius,
                         ),
                     )
-            
+
             # Log background separately
             if background_mask.sum() > 0:
                 bg_pos = pos[background_mask]

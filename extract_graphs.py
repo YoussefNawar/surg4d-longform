@@ -16,10 +16,8 @@ from utils.rerun_utils import (
     log_graph_structure_through_time,
 )
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 
 def clusters_to_rgb(clusters: np.ndarray) -> np.ndarray:
@@ -122,9 +120,12 @@ def temporal_lof_outlier_mask(
             outlier_mask[cluster_indices[strong_outlier_mask]] = True
 
     if histogram_output_dir is not None and len(all_negative_outlier_factors) > 0:
-        all_negative_outlier_factors = np.concatenate(all_negative_outlier_factors, axis=0)
+        all_negative_outlier_factors = np.concatenate(
+            all_negative_outlier_factors, axis=0
+        )
         plot_negative_outlier_factors = all_negative_outlier_factors[
-            (all_negative_outlier_factors >= -5.0) & (all_negative_outlier_factors <= 0.0)
+            (all_negative_outlier_factors >= -5.0)
+            & (all_negative_outlier_factors <= 0.0)
         ]
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.hist(
@@ -149,7 +150,8 @@ def temporal_lof_outlier_mask(
         ax.set_ylabel("Count")
         fig.tight_layout()
         fig.savefig(
-            histogram_output_dir / "lof_negative_outlier_factor_hist_global.png", dpi=150
+            histogram_output_dir / "lof_negative_outlier_factor_hist_global.png",
+            dpi=150,
         )
         plt.close(fig)
 
@@ -166,7 +168,9 @@ def load_precomputed_instance_clusters(clip: DictConfig, cfg: DictConfig) -> np.
         clusters: (N_gaussians,) array of instance IDs, -1 for background/unassigned
     """
     clip_dir = Path(cfg.preprocessed_root) / clip.name
-    merged_ids_path = clip_dir / cfg.graph_extraction.cotracker_subdir / "merged_instance_ids.npy"
+    merged_ids_path = (
+        clip_dir / cfg.graph_extraction.cotracker_subdir / "merged_instance_ids.npy"
+    )
 
     clusters = np.load(merged_ids_path)
 
@@ -272,14 +276,24 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         torch.cuda.manual_seed_all(cfg.seed)
 
     # load points
-    points_file = Path(cfg.preprocessed_root) / clip.name / cfg.graph_extraction.cotracker_subdir / "point_positions_precomputed.npy"
+    points_file = (
+        Path(cfg.preprocessed_root)
+        / clip.name
+        / cfg.graph_extraction.cotracker_subdir
+        / "point_positions_precomputed.npy"
+    )
     points_through_time = np.load(points_file)  # (T, N, 3)
 
     # sumbsample temporally
-    points_through_time = points_through_time[::cfg.graph_extraction.timestep_stride]
+    points_through_time = points_through_time[:: cfg.graph_extraction.timestep_stride]
 
     # load point colors from CoTracker preprocessing
-    point_colors_file = Path(cfg.preprocessed_root) / clip.name / cfg.graph_extraction.cotracker_subdir / "point_colors.npy"
+    point_colors_file = (
+        Path(cfg.preprocessed_root)
+        / clip.name
+        / cfg.graph_extraction.cotracker_subdir
+        / "point_colors.npy"
+    )
     ply_colors = np.load(point_colors_file).astype(np.float32) / 255.0
     logger.info(f"Loaded {ply_colors.shape[0]} point colors from {point_colors_file}")
     if points_through_time.shape[1] != ply_colors.shape[0]:
@@ -287,19 +301,24 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
             f"number of colors ({ply_colors.shape[0]}) does not match number of gaussians ({points_through_time.shape[1]})"
         )
 
-
     # load clusters and semantic labels
-    graph_output_dir = Path(cfg.output_root) / clip.name / cfg.graph_extraction.graph_output_subdir
+    graph_output_dir = (
+        Path(cfg.output_root) / clip.name / cfg.graph_extraction.graph_output_subdir
+    )
     graph_output_dir.mkdir(parents=True, exist_ok=True)
     clusters = load_precomputed_instance_clusters(clip, cfg)
     clip_dir = Path(cfg.preprocessed_root) / clip.name
-    semantic_labels_path = clip_dir / cfg.graph_extraction.cotracker_subdir / "merged_instance_semantic_labels.json"
+    semantic_labels_path = (
+        clip_dir
+        / cfg.graph_extraction.cotracker_subdir
+        / "merged_instance_semantic_labels.json"
+    )
     with open(semantic_labels_path, "r") as f:
         semantic_labels_raw = json.load(f)
         semantic_labels = {int(k): v for k, v in semantic_labels_raw.items()}
 
     # filter small clusters and reindex to contiguous ids
-    print('BEFORE')
+    print("BEFORE")
     print(np.unique(clusters, return_counts=True))
     print(semantic_labels)
     clusters, semantic_labels = filter_and_reindex_clusters(
@@ -307,7 +326,7 @@ def extract_graph(clip: DictConfig, cfg: DictConfig):
         min_cluster_size=cfg.graph_extraction.min_cluster_size,
         semantic_labels=semantic_labels,
     )
-    print('AFTER')
+    print("AFTER")
     print(np.unique(clusters, return_counts=True))
     print(semantic_labels)
     logger.info(f"Post-clustering filtering...")

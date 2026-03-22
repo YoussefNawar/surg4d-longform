@@ -19,6 +19,7 @@ from typing import List, Dict, Any, Tuple
 
 import torch
 from omegaconf import DictConfig
+
 # from llm.qwen_utils import (
 #     prompt_with_video,
 #     prompt_graph_agent_with_semantic_labels,
@@ -35,35 +36,35 @@ from benchmark.graph_utils import get_coord_transformations
 
 def load_video_frames(video_dir: Path, images_subdir: str) -> "Tuple[List[Path], int]":
     """Load video frames from directory.
-    
+
     Args:
         video_dir: Root directory containing video data
         images_subdir: Subdirectory containing frame images
-        
+
     Returns:
         Tuple of (sorted frame paths, num_frames)
     """
     images_dir = video_dir / images_subdir
     if not images_dir.exists():
         raise FileNotFoundError(f"Images directory not found: {images_dir}")
-    
+
     frames = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
     num_frames = len(frames)
-    
+
     if num_frames == 0:
         raise FileNotFoundError(f"No .jpg or .png images found in {images_dir}")
-    
+
     return frames, num_frames
 
 
 def seconds_to_timestep(seconds: float, num_timesteps: int, fps: float) -> int:
     """Convert seconds to nearest timestep using nearest neighbor rounding.
-    
+
     Args:
         seconds: Time in seconds
         num_timesteps: Total number of timesteps (frames)
         fps: Frames per second
-        
+
     Returns:
         Nearest timestep (integer frame index)
     """
@@ -77,10 +78,10 @@ def seconds_to_timestep(seconds: float, num_timesteps: int, fps: float) -> int:
 
 def load_graph_data(graph_path: Path) -> Dict[str, Any]:
     """Load precomputed 4D graph data.
-    
+
     Args:
         graph_path: Path to graph directory
-        
+
     Returns:
         Dict with graph data
     """
@@ -88,42 +89,42 @@ def load_graph_data(graph_path: Path) -> Dict[str, Any]:
     centers = np.load(graph_path / "c_centers.npy")
     centroids = np.load(graph_path / "c_centroids.npy")
     extents = np.load(graph_path / "c_extents.npy")
-    
+
     return {
-        'adjacency_matrices': adjacency_matrices,
-        'node_centers': centers,
-        'node_centroids': centroids,
-        'node_extents': extents
+        "adjacency_matrices": adjacency_matrices,
+        "node_centers": centers,
+        "node_centroids": centroids,
+        "node_extents": extents,
     }
 
 
 def get_num_timesteps_from_graph(graph_path: Path) -> int:
     """Get number of timesteps from graph data.
-    
+
     Args:
         graph_path: Path to graph directory
-        
+
     Returns:
         Number of timesteps
     """
     graph_data = load_graph_data(graph_path)
-    return int(graph_data['adjacency_matrices'].shape[0])
+    return int(graph_data["adjacency_matrices"].shape[0])
 
 
 def multiframe_queries(
     model,
     processor,
     video_frames: List[Path],
-    graph_path: Path, # mock
+    graph_path: Path,  # mock
     annotations: List[Dict],
     clip: "DictConfig",
     cfg: "DictConfig",
-    use_semantic_labels: bool = False, # mock
-    semantic_method_name: str = "", # mock
+    use_semantic_labels: bool = False,  # mock
+    semantic_method_name: str = "",  # mock
     use_masks: bool = False,
 ) -> List[Dict]:
     """Run multiframe (video-only) temporal queries.
-    
+
     Args:
         model: Qwen VL model
         processor: Qwen VL processor
@@ -132,21 +133,21 @@ def multiframe_queries(
         annotations: List of query annotations
         clip: Clip config
         cfg: Full hydra config
-        
+
     Returns:
         List of result dicts
     """
     # Load graph to determine stride for frame sampling
-    selected_frames = video_frames[::cfg.eval.annotation_stride]
+    selected_frames = video_frames[:: cfg.eval.annotation_stride]
 
     if use_masks:
         overlay_dir = (
-            Path(cfg.preprocessed_root)
-            / clip.name
-            / cfg.eval.paths.overlay_subdir
+            Path(cfg.preprocessed_root) / clip.name / cfg.eval.paths.overlay_subdir
         )
-        selected_frames = [overlay_dir / f"{frame_path.stem}.png" for frame_path in selected_frames]
-    
+        selected_frames = [
+            overlay_dir / f"{frame_path.stem}.png" for frame_path in selected_frames
+        ]
+
     # Calculate effective FPS based on stride
     # Original video is at video_fps, but we sample every stride frames
     # For 20 graph timesteps from 25 fps video: effective_fps = 25 / 4 = 6.25
@@ -158,26 +159,30 @@ def multiframe_queries(
         method_name = "multiframe_masks" if use_masks else "multiframe"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Running [{query_id}] with method [{method_name}]")
-        query_type = query_anno['type']
+        query_type = query_anno["type"]
 
         # prompt
         if use_masks:
             system_prompt = cfg.eval.temporal.multiframe_masks_system_prompt
         else:
             system_prompt = cfg.eval.temporal.multiframe_system_prompt
-        if query_type == 'pit':
+        if query_type == "pit":
             if use_masks:
                 template = cfg.eval.temporal.multiframe_masks_pit_prompt_template
             else:
                 template = cfg.eval.temporal.multiframe_pit_prompt_template
-        elif query_type == 'range':
+        elif query_type == "range":
             if use_masks:
-                template = cfg.eval.temporal.multiframe_masks_action_duration_prompt_template
+                template = (
+                    cfg.eval.temporal.multiframe_masks_action_duration_prompt_template
+                )
             else:
                 template = cfg.eval.temporal.multiframe_action_duration_prompt_template
         else:
-            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
-        prompt = template.format(question=query_anno['query'])
+            raise ValueError(
+                f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}"
+            )
+        prompt = template.format(question=query_anno["query"])
 
         # llm answer
         response = prompt_with_video(
@@ -188,14 +193,18 @@ def multiframe_queries(
             system_prompt=system_prompt,
             fps=effective_fps,
         )
-        
+
         # parse answer and convert to timestep
         json_data = parse_json(response)
-        if query_type == 'pit':
+        if query_type == "pit":
             second = json_data.get("second", None) if json_data is not None else None
-            prediction = seconds_to_timestep(second, cfg.eval.n_timesteps, effective_fps)
-        elif query_type == 'range':
-            second_ranges = json_data.get("second_ranges", None) if json_data is not None else None
+            prediction = seconds_to_timestep(
+                second, cfg.eval.n_timesteps, effective_fps
+            )
+        elif query_type == "range":
+            second_ranges = (
+                json_data.get("second_ranges", None) if json_data is not None else None
+            )
             if not isinstance(second_ranges, list):
                 prediction = None
             else:
@@ -204,28 +213,38 @@ def multiframe_queries(
                     if not isinstance(second_range, list) or len(second_range) != 2:
                         prediction = None
                         break
-                    prediction.append([
-                        seconds_to_timestep(second_range[0], cfg.eval.n_timesteps, effective_fps),
-                        seconds_to_timestep(second_range[1], cfg.eval.n_timesteps, effective_fps),
-                    ])
+                    prediction.append(
+                        [
+                            seconds_to_timestep(
+                                second_range[0], cfg.eval.n_timesteps, effective_fps
+                            ),
+                            seconds_to_timestep(
+                                second_range[1], cfg.eval.n_timesteps, effective_fps
+                            ),
+                        ]
+                    )
         else:
-            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+            raise ValueError(
+                f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}"
+            )
 
-        results.append({
-            'id': query_anno['id'],
-            'type': query_type,
-            'query': query_anno['query'],
-            'predicted': prediction,
-            'raw_response': response,
-            'message_history': [],
-            'tool_calls': [],
-        })
-        
+        results.append(
+            {
+                "id": query_anno["id"],
+                "type": query_type,
+                "query": query_anno["query"],
+                "predicted": prediction,
+                "raw_response": response,
+                "message_history": [],
+                "tool_calls": [],
+            }
+        )
+
         # Clear memory after each query to prevent OOM with video inputs
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    
+
     return results
 
 
@@ -241,11 +260,11 @@ def graph_agent_queries(
     semantic_method_name: str = "graph_agent_semantics",
 ) -> List[Dict]:
     """Run graph agent temporal queries with tools.
-    
+
     Uses prompt_graph_agent with agentic tool use (requires qwen3).
     Provides initial rough nodes at timestep 0, then agent uses temporal tools to explore.
     Loads graph artifacts and creates GraphTools instance with temporal reasoning tools.
-    
+
     Args:
         model: Qwen VL model (must be qwen3)
         processor: Qwen VL processor
@@ -253,7 +272,7 @@ def graph_agent_queries(
         annotations: List of query annotations
         clip: Clip config
         cfg: Full hydra config
-        
+
     Returns:
         List of result dicts
     """
@@ -265,7 +284,7 @@ def graph_agent_queries(
     clusters_path = graph_path / "clusters.npy"
     adjacency_path = graph_path / "graph.npy"
     bhattacharyya_path = graph_path / "bhattacharyya_coeffs.npy"
-    
+
     node_centers = np.load(centers_path)
     node_centroids = np.load(centroids_path)
     node_extents = np.load(extents_path)
@@ -281,11 +300,11 @@ def graph_agent_queries(
 
     point_o2n, _, distance_o2n, _ = get_coord_transformations(positions)
 
-    if semantic_method_name == 'graph_agent_semantics_vision':
+    if semantic_method_name == "graph_agent_semantics_vision":
         max_iterations = cfg.eval.temporal.graph_agent_semantics_vision_max_iterations
         tool_config = cfg.eval.temporal.graph_agent_semantics_vision_tools
         system_prompt = cfg.eval.temporal.graph_agent_semantics_vision_system_prompt
-    elif semantic_method_name == 'graph_agent_semantics':
+    elif semantic_method_name == "graph_agent_semantics":
         max_iterations = cfg.eval.temporal.graph_agent_semantics_max_iterations
         tool_config = cfg.eval.temporal.graph_agent_semantics_tools
         system_prompt = cfg.eval.temporal.graph_agent_semantics_system_prompt
@@ -302,14 +321,14 @@ def graph_agent_queries(
         video_frames=video_frames,
         annotation_stride=cfg.eval.annotation_stride,
     )
-    
+
     # Setup tool visualization directory if configured
     tool_viz_enabled = cfg.eval.temporal.tool_viz_dir is not None
     tool_viz_dir = None
     if tool_viz_enabled:
         tool_viz_dir = Path(cfg.eval.temporal.tool_viz_dir) / clip.name
         tool_viz_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Parse graph_agent_tools config (list of objects with name and max_calls)
     tool_names = []
     tool_call_limits = {}
@@ -319,10 +338,10 @@ def graph_agent_queries(
         max_calls = tool_entry.max_calls
         if max_calls is not None:
             tool_call_limits[tool_name] = max_calls
-    
+
     # Get the specific tools needed for graph agent
     tools = graph_tools.get_tools_by_name(tool_names)
-    
+
     # Convert to None if no limits specified
     if len(tool_call_limits) == 0:
         tool_call_limits = None
@@ -330,41 +349,53 @@ def graph_agent_queries(
     # Process each query
     results = []
     for query_anno in annotations:
-        query_type = query_anno['type']
-        query_id = query_anno['id']
+        query_type = query_anno["type"]
+        query_id = query_anno["id"]
         method_name = semantic_method_name if use_semantic_labels else "graph_agent"
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Running [{query_id}] with method [{method_name}]")
-        query = query_anno['query']
-        
+        query = query_anno["query"]
+
         # Start recording if tool visualization is enabled
         if tool_viz_enabled:
             # Sanitize question text for filename
-            sanitized_question = re.sub(r'[^\w\s-]', '', query)  # Remove special chars
-            sanitized_question = re.sub(r'\s+', '_', sanitized_question)  # Replace whitespace with _
+            sanitized_question = re.sub(r"[^\w\s-]", "", query)  # Remove special chars
+            sanitized_question = re.sub(
+                r"\s+", "_", sanitized_question
+            )  # Replace whitespace with _
             sanitized_question = sanitized_question[:50]  # Limit length
-            rrd_file = tool_viz_dir / f"{method_name}_{query_id}_{sanitized_question}.rrd"
+            rrd_file = (
+                tool_viz_dir / f"{method_name}_{query_id}_{sanitized_question}.rrd"
+            )
             graph_tools.start_recording(str(rrd_file))
-        
+
         # prompt
-        if query_type == 'pit':
-            if semantic_method_name == 'graph_agent_semantics_vision':
-                template = cfg.eval.temporal.graph_agent_semantics_vision_pit_prompt_template
-            elif semantic_method_name == 'graph_agent_semantics':
+        if query_type == "pit":
+            if semantic_method_name == "graph_agent_semantics_vision":
+                template = (
+                    cfg.eval.temporal.graph_agent_semantics_vision_pit_prompt_template
+                )
+            elif semantic_method_name == "graph_agent_semantics":
                 template = cfg.eval.temporal.graph_agent_semantics_pit_prompt_template
             else:
                 raise ValueError(f"Unsupported semantic method: {semantic_method_name}")
-        elif query_type == 'range':
-            if semantic_method_name == 'graph_agent_semantics_vision':
-                template = cfg.eval.temporal.graph_agent_semantics_vision_range_prompt_template
-            elif semantic_method_name == 'graph_agent_semantics':
+        elif query_type == "range":
+            if semantic_method_name == "graph_agent_semantics_vision":
+                template = (
+                    cfg.eval.temporal.graph_agent_semantics_vision_range_prompt_template
+                )
+            elif semantic_method_name == "graph_agent_semantics":
                 template = cfg.eval.temporal.graph_agent_semantics_range_prompt_template
             else:
                 raise ValueError(f"Unsupported semantic method: {semantic_method_name}")
         else:
-            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+            raise ValueError(
+                f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}"
+            )
         num_ts = graph_tools.adjacency.shape[0]
-        prompt = template.format(question=query, num_frames=num_ts, last_frame=num_ts - 1)
+        prompt = template.format(
+            question=query, num_frames=num_ts, last_frame=num_ts - 1
+        )
 
         agent_result = prompt_graph_agent_with_semantic_labels(
             question=prompt,
@@ -380,41 +411,51 @@ def graph_agent_queries(
             max_iterations=max_iterations,
             tool_call_limits=tool_call_limits,
         )
-        
+
         # Stop recording if tool visualization is enabled
         if tool_viz_enabled:
             graph_tools.stop_recording()
-        
+
         # Extract response (agent_result is a dict when tools are used)
         json_data = parse_json(agent_result["final_answer"])
-        if query_type == 'pit':
-            prediction = json_data.get("timestep", None) if json_data is not None else None
-        elif query_type == 'range':
-            prediction = json_data.get("ranges", None) if json_data is not None else None
+        if query_type == "pit":
+            prediction = (
+                json_data.get("timestep", None) if json_data is not None else None
+            )
+        elif query_type == "range":
+            prediction = (
+                json_data.get("ranges", None) if json_data is not None else None
+            )
             if not isinstance(prediction, list):
                 prediction = None
             else:
                 for predicted_range in prediction:
-                    if not isinstance(predicted_range, list) or len(predicted_range) != 2:
+                    if (
+                        not isinstance(predicted_range, list)
+                        or len(predicted_range) != 2
+                    ):
                         prediction = None
                         break
         else:
-            raise ValueError(f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}")
+            raise ValueError(
+                f"Unsupported query type for {clip.name} {query_anno['id']}: {query_type}"
+            )
 
-        results.append({
-            'id': query_anno['id'],
-            'type': query_type,
-            'query': query_anno['query'],
-            'predicted': prediction,
-            'raw_response': agent_result["final_answer"],
-            'message_history': agent_result["message_history"],
-            'tool_calls': sanitize_tool_calls(agent_result.get("tool_calls", [])),
-        })
-        
+        results.append(
+            {
+                "id": query_anno["id"],
+                "type": query_type,
+                "query": query_anno["query"],
+                "predicted": prediction,
+                "raw_response": agent_result["final_answer"],
+                "message_history": agent_result["message_history"],
+                "tool_calls": sanitize_tool_calls(agent_result.get("tool_calls", [])),
+            }
+        )
+
         # Clear memory after each query to prevent OOM
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     return results
-

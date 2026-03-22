@@ -28,18 +28,17 @@ def extract_geometry(clip: DictConfig, cfg: DictConfig, model: DepthAnything3):
     torch.manual_seed(cfg.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.seed)
-    
 
     clip_dir = Path(cfg.preprocessed_root) / clip.name
     images_dir = clip_dir / cfg.extract_geometry.image_subdir
 
     # construct image paths and determine processing resolution close to orig
-    image_filenames = sorted(
-        list(images_dir.glob("*.png")), key=extract_frame_number
-    )
+    image_filenames = sorted(list(images_dir.glob("*.png")), key=extract_frame_number)
     image_filenames = [str(img_file) for img_file in image_filenames]
     orig_w, orig_h = Image.open(image_filenames[0]).size
-    processing_res = max(orig_w, orig_h) # by setting this + upper bound resize we ensure processing res is equal to original image size, since we already make it divisible by da3 vit patch size in preprocess step
+    processing_res = max(
+        orig_w, orig_h
+    )  # by setting this + upper bound resize we ensure processing res is equal to original image size, since we already make it divisible by da3 vit patch size in preprocess step
 
     # da3 inference
     prediction = model.inference(
@@ -52,7 +51,9 @@ def extract_geometry(clip: DictConfig, cfg: DictConfig, model: DepthAnything3):
     # Apply edge filtering to prediction at processed resolution (if configured)
     edge_gradient_threshold = cfg.extract_geometry.da3_edge_gradient_threshold
     if edge_gradient_threshold is not None:
-        logger.info(f"Applying depth edge filtering with threshold: {edge_gradient_threshold}")
+        logger.info(
+            f"Applying depth edge filtering with threshold: {edge_gradient_threshold}"
+        )
         prediction = filter_prediction_edge_artifacts(
             prediction,
             gradient_threshold=edge_gradient_threshold,
@@ -63,10 +64,10 @@ def extract_geometry(clip: DictConfig, cfg: DictConfig, model: DepthAnything3):
     export_dir = clip_dir / cfg.extract_geometry.da3_subdir
     export_dir.mkdir(parents=True, exist_ok=True)
     export_dict = {
-        "depth": prediction.depth, # (T, H, W)
-        "conf": prediction.conf, # (T, H, W)
-        "intrinsics": prediction.intrinsics, # (T, 3, 3)
-        "extrinsics": prediction.extrinsics # (T, 3, 4)
+        "depth": prediction.depth,  # (T, H, W)
+        "conf": prediction.conf,  # (T, H, W)
+        "intrinsics": prediction.intrinsics,  # (T, 3, 3)
+        "extrinsics": prediction.extrinsics,  # (T, 3, 4)
     }
 
     np.savez(export_dir / "results.npz", **export_dict)

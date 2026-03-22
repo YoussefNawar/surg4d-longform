@@ -145,11 +145,15 @@ def stack(images: list[np.ndarray], axis: int = 0):
     images = [
         np.pad(
             image,
-            [(0, 0)] * pad_axis + [(0, max_size - image.shape[pad_axis])] + [(0, 0)] * (2 - pad_axis),
+            [(0, 0)] * pad_axis
+            + [(0, max_size - image.shape[pad_axis])]
+            + [(0, 0)] * (2 - pad_axis),
         )
         for image in images
     ]
-    log.debug(f"Stacking images with shapes {[image.shape for image in images]} along {axis}")
+    log.debug(
+        f"Stacking images with shapes {[image.shape for image in images]} along {axis}"
+    )
 
     # Stack the images
     return np.concatenate(images, axis=axis)
@@ -196,7 +200,9 @@ def combine_heatmap(
         heat_sum += heat
 
     for c in range(3):
-        image_arr[c] = ((1 - heat_sum) * image_arr[c]) + (heat_sum if c == channel else 0)
+        image_arr[c] = ((1 - heat_sum) * image_arr[c]) + (
+            heat_sum if c == channel else 0
+        )
 
     # log.debug(f"Combined heatmap with shape {image_arr.shape} and dtype {image_arr.dtype}")
 
@@ -393,7 +399,9 @@ def outline_masks(
         if not bool_mask.any():
             continue
 
-        contours_, _ = cv2.findContours(bool_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours_, _ = cv2.findContours(
+            bool_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         c = tuple((255 * colors[i]).astype(int).tolist())
         image = as_uint8(image)
         cv2.drawContours(image, contours_, -1, c, thickness)
@@ -479,16 +487,24 @@ def draw_masks(
 
         inst_bool_masks = inst_masks > threshold
         sem_bool_masks = sem_masks > threshold
-        overlap_scores = (inst_bool_masks[:, np.newaxis] & sem_bool_masks[np.newaxis]).sum(axis=(2, 3))
+        overlap_scores = (
+            inst_bool_masks[:, np.newaxis] & sem_bool_masks[np.newaxis]
+        ).sum(axis=(2, 3))
         dominant_semantic_idx = np.argmax(overlap_scores, axis=1)
 
         if colors is None:
-            sem_colors = get_colors(sem_masks.shape[0], colors=None, palette=palette, seed=seed)
+            sem_colors = get_colors(
+                sem_masks.shape[0], colors=None, palette=palette, seed=seed
+            )
             colors = sem_colors[dominant_semantic_idx]
         else:
-            colors = get_colors(inst_masks.shape[0], colors=colors, palette=palette, seed=seed)
+            colors = get_colors(
+                inst_masks.shape[0], colors=colors, palette=palette, seed=seed
+            )
     else:
-        colors = get_colors(inst_masks.shape[0], colors=colors, palette=palette, seed=seed)
+        colors = get_colors(
+            inst_masks.shape[0], colors=colors, palette=palette, seed=seed
+        )
 
     if names is None and dominant_semantic_idx is not None:
         names = []
@@ -522,7 +538,9 @@ def draw_masks(
         image[bool_mask] = colors[i] * alpha + image[bool_mask] * (1 - alpha)
 
         if contours:
-            contours_, _ = cv2.findContours(bool_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours_, _ = cv2.findContours(
+                bool_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
             image = as_uint8(image)
             c = tuple((255 * colors[i]).astype(int).tolist())
             cv2.drawContours(image, contours_, -1, c, contour_thickness)
@@ -557,7 +575,9 @@ def draw_masks(
             elif horizontal_alignment == "right":
                 mx = np.max(xs)
             else:
-                raise ValueError(f"Invalid horizontal alignment: {horizontal_alignment}")
+                raise ValueError(
+                    f"Invalid horizontal alignment: {horizontal_alignment}"
+                )
 
             if vertical_alignment == "top":
                 my = np.min(ys)
@@ -625,7 +645,9 @@ def draw_boxes(
 
     image = ensure_cdim(as_uint8(image).copy())
     if colors is None:
-        colors = (np.array(sns.color_palette(palette, boxes.shape[0])) * 255).astype(image.dtype)
+        colors = (np.array(sns.color_palette(palette, boxes.shape[0])) * 255).astype(
+            image.dtype
+        )
         if seed is not None:
             np.random.seed(seed)
         colors = colors[np.random.permutation(colors.shape[0])]
@@ -636,7 +658,9 @@ def draw_boxes(
     for i, box in enumerate(boxes):
         color = colors[i].tolist()
         x1, y1, x2, y2 = box
-        image = cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
+        image = cv2.rectangle(
+            image, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness
+        )
 
     fontscale = 0.75 / 512 * image.shape[0]
     offset = max(5, int(5 / 512 * image.shape[0]))
@@ -825,7 +849,16 @@ def draw_outlined_text(
 ) -> np.ndarray:
     """Draw text with an outline by drawing it twice."""
     # Draw the outline first
-    cv2.putText(image, text, pos, font, font_scale, outline_color, outline_thickness, cv2.LINE_AA)
+    cv2.putText(
+        image,
+        text,
+        pos,
+        font,
+        font_scale,
+        outline_color,
+        outline_thickness,
+        cv2.LINE_AA,
+    )
     # Draw the main text on top
     cv2.putText(image, text, pos, font, font_scale, color, thickness, cv2.LINE_AA)
     return image

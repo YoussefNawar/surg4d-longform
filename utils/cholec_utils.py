@@ -40,7 +40,8 @@ def get_clip_seg8k(
     }
     all_color_masks = {
         int(i.stem.split("_")[1]): i
-        for i in clip_dir.glob("frame_*_endo_color_mask.png")}
+        for i in clip_dir.glob("frame_*_endo_color_mask.png")
+    }
 
     if last_frame - 1 > max(all_frames.keys()):
         raise FileNotFoundError(
@@ -129,10 +130,10 @@ def seg8k_endo_watershed_to_class_ids(endo_watershed_mask: Image.Image):
 
 def seg8k_class_id_to_class_name(class_id: int) -> str:
     """Get semantic label string from class ID.
-    
+
     Args:
         class_id: Semantic class ID (0-12)
-    
+
     Returns:
         Semantic label string
     """

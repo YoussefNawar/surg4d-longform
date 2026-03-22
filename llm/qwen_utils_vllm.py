@@ -26,11 +26,9 @@ class VLLMQwen3Model:
     model_path: str
 
 
-
 def timestep_to_seconds_str(timestep: int, fps: float) -> str:
     seconds = timestep / fps
     return f'time="<{seconds:.1f} seconds>"'
-
 
 
 def _build_model_path(size: Literal["8B", "32B"], use_fp8: bool) -> str:
@@ -86,11 +84,17 @@ def _patch_video_metadata_for_vllm() -> None:
             if isinstance(frames_indices, (list, tuple)) and len(frames_indices) > 0:
                 kwargs["total_num_frames"] = int(max(frames_indices)) + 1
 
-        if "duration" in kwargs and "fps" in kwargs and "total_num_frames" not in kwargs:
+        if (
+            "duration" in kwargs
+            and "fps" in kwargs
+            and "total_num_frames" not in kwargs
+        ):
             duration = kwargs.get("duration")
             fps = kwargs.get("fps")
             if duration is not None and fps is not None:
-                kwargs["total_num_frames"] = max(1, int(round(float(duration) * float(fps))))
+                kwargs["total_num_frames"] = max(
+                    1, int(round(float(duration) * float(fps)))
+                )
 
         if "total_num_frames" not in kwargs:
             kwargs["total_num_frames"] = 1
@@ -107,7 +111,6 @@ def _patch_video_metadata_for_vllm() -> None:
     video_metadata_cls._vllm_video_metadata_compat = True
 
 
-
 def get_qwen3(
     size: Literal["8B", "32B"] = "8B",
     use_fp8: bool = False,
@@ -118,12 +121,18 @@ def get_qwen3(
 ):
     model_path = _build_model_path(size=size, use_fp8=use_fp8)
     os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = worker_multiproc_method
-    os.environ["VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS"] = str(execute_model_timeout_seconds)
-    _configure_runtime_build_env() # need to do this before import
+    os.environ["VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS"] = str(
+        execute_model_timeout_seconds
+    )
+    _configure_runtime_build_env()  # need to do this before import
     _patch_video_metadata_for_vllm()
     from vllm import LLM
 
-    dtype_str = "auto" if use_fp8 else ("bfloat16" if torch_dtype == torch.bfloat16 else "float16")
+    dtype_str = (
+        "auto"
+        if use_fp8
+        else ("bfloat16" if torch_dtype == torch.bfloat16 else "float16")
+    )
 
     llm = LLM(
         model=model_path,
@@ -141,10 +150,8 @@ def get_qwen3(
     return model, processor
 
 
-
 def _set_generation_seed(seed: int) -> None:
     torch.manual_seed(seed)
-
 
 
 def _sampling_params(
@@ -166,15 +173,12 @@ def _sampling_params(
     return SamplingParams(**kwargs)
 
 
-
 def _extract_text_from_request_output(request_output: Any) -> str:
     return request_output.outputs[0].text
 
 
-
 def _extract_generated_token_count(request_output: Any) -> int:
     return len(request_output.outputs[0].token_ids)
-
 
 
 def _generate_text(
@@ -246,7 +250,6 @@ def _generate_text(
     return forced_think_prefix + answer_text, total_tokens, total_time
 
 
-
 def prompt_with_image(
     image: Image.Image,
     prompt: str,
@@ -289,7 +292,6 @@ def prompt_with_image(
     return output_text
 
 
-
 def _parse_tool_calls(response: str) -> List[Dict[str, Any]]:
     tool_calls = []
     pattern = r"<tool_call>\s*({.*?})\s*</tool_call>"
@@ -303,11 +305,9 @@ def _parse_tool_calls(response: str) -> List[Dict[str, Any]]:
     return tool_calls
 
 
-
 def _extract_final_answer(response: str) -> str:
     cleaned = re.sub(r"<tool_call>.*?</tool_call>", "", response, flags=re.DOTALL)
     return cleaned.strip()
-
 
 
 def build_tool_response_message(
@@ -352,7 +352,6 @@ def build_tool_response_message(
     return message, all_images
 
 
-
 def _filter_tensors_for_debug(obj: Any) -> Any:
     if isinstance(obj, (torch.Tensor, np.ndarray, np.generic)):
         return None
@@ -371,7 +370,6 @@ def _filter_tensors_for_debug(obj: Any) -> Any:
         return filtered if filtered else None
     else:
         return obj
-
 
 
 def _format_message_trace_for_debug(
@@ -441,7 +439,6 @@ def _format_message_trace_for_debug(
 
     lines.append("\n" + "=" * 80)
     return "\n".join(lines)
-
 
 
 def generate_agentic(
@@ -587,7 +584,9 @@ def generate_agentic(
 
                         result_data = json.loads(result["text"])
                         result_data["remaining_calls"] = (
-                            remaining_after if remaining_after is not None else "infinite"
+                            remaining_after
+                            if remaining_after is not None
+                            else "infinite"
                         )
                         result["text"] = json.dumps(result_data)
                     except Exception as exc:
@@ -631,7 +630,9 @@ def generate_agentic(
 
     final_answer = _extract_final_answer(response)
     tok_per_sec = (
-        total_generated_tokens / total_generation_time if total_generation_time > 0 else 0.0
+        total_generated_tokens / total_generation_time
+        if total_generation_time > 0
+        else 0.0
     )
     total_time = time.time() - fn_start_time
     return {
@@ -642,7 +643,6 @@ def generate_agentic(
         "total_generation_time": total_generation_time,
         "total_time": total_time,
     }
-
 
 
 def prompt_graph_agent_with_semantic_labels(
@@ -663,12 +663,12 @@ def prompt_graph_agent_with_semantic_labels(
     max_new_tokens: int = MAX_NEW_TOKENS,
     max_thinking_tokens: Optional[int] = MAX_THINKING_TOKENS,
 ):
-    assert tools is not None and len(tools) > 0, (
-        "tools are required for graph agentic prompting"
-    )
-    assert len(node_centers) == len(node_centroids) == len(node_extents), (
-        "timestep mismatch"
-    )
+    assert (
+        tools is not None and len(tools) > 0
+    ), "tools are required for graph agentic prompting"
+    assert (
+        len(node_centers) == len(node_centroids) == len(node_extents)
+    ), "timestep mismatch"
 
     centroids = node_centroids[initial_timestep_idx]
     extents = node_extents[initial_timestep_idx]
@@ -743,14 +743,12 @@ def prompt_graph_agent_with_semantic_labels(
     )
 
 
-
 def _load_video_frames(image_paths: List[Any]) -> List[np.ndarray]:
     frames = []
     for image_path in image_paths:
         with Image.open(Path(image_path)) as frame_image:
             frames.append(np.array(frame_image.convert("RGB")))
     return frames
-
 
 
 def prompt_with_video(

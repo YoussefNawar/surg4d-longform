@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def get_coord_transformations(positions: np.ndarray):
     """Get original2normalized and normalized2original coordinate transformations for this scene.
 
@@ -45,4 +46,9 @@ def get_coord_transformations(positions: np.ndarray):
     def distance_normalized2original(x):
         return x / 100
 
-    return point_original2normalized, point_normalized2original, distance_original2normalized, distance_normalized2original
+    return (
+        point_original2normalized,
+        point_normalized2original,
+        distance_original2normalized,
+        distance_normalized2original,
+    )
