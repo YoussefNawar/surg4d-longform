@@ -59,6 +59,13 @@ curl -L -o sam2.1_hiera_large.pt https://dl.fbaipublicfiles.com/segment_anything
 cd ../../../../..
 """
 
+download-cholecseg8k = """
+mkdir -p data/cholecseg8k && \
+wget -O data/cholecseg8k/cholecseg8k.zip https://www.kaggle.com/api/v1/datasets/download/newslab/cholecseg8k || \
+curl -L -o data/cholecseg8k/cholecseg8k.zip https://www.kaggle.com/api/v1/datasets/download/newslab/cholecseg8k && \
+unzip -o data/cholecseg8k/cholecseg8k.zip -d data/cholecseg8k
+"""
+
 install-sds-playground = """
 cd submodules/SDS_Playground && uv pip install -e . && cd ../..
 """
