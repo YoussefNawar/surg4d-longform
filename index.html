@@ -139,7 +139,8 @@
             <p class="cover-unified__affiliations is-5 is-size-5-mobile myfont">
               <sup class="is-size-6-mobile">1</sup> Computer Aided Medical Procedures, TU Munich, Munich, Germany <br>
               <sup class="is-size-6-mobile">2</sup> TUM.ai, Munich, Germany <br>
-              <sup class="is-size-6-mobile">3</sup> Hospital of the LMU Munich, Ludwig-Maximilians-Universität (LMU), Munich, Germany <br>
+              <sup class="is-size-6-mobile">3</sup> University Hospital of Ludwig Maximilian University (LMU)
+              Munich, Munich, Germany <br>
               <sup class="is-size-6-mobile">4</sup> Munich Center for Machine Learning, Munich, Germany
             </p>
           </div>
@@ -280,13 +281,13 @@
       </div>
 
       <h2 class="reasoning-subhead reasoning-subhead-center reasoning-task-header">Spatial grounding</h2>
-      <p class="reasoning-storyline reasoning-storyline-center">To perform spatial grounding in 3D, we pose a query for a specific timestep. Below examples show the corresponding frame on the left, the interactive 4D visualization for the whole sequence in the middle, and the 2D projection of the model's answer on the right, overlayed as a blue dot on the frame corresponding to the query. Note that the agent does not receive that frame and only operates on the 4D representation.<br> <strong><i>To interpret the 4D visualization correctly: at the specific timestep, structures and interaction points that the agent requested via a tool call will light up in blue and red and their 3D state at that time will remain frozen and visible as the sequence progresses. You may use the arrow keys or the timeline scrollbar to easily find the relevant timestep. For the agent, only this state matters for the spatial queries. Interaction points are highlighted with a red dot in 3D.</i></strong></p>
+      <p class="reasoning-storyline reasoning-storyline-center">To perform spatial grounding in 3D, we pose a query for a specific timestep. Below examples show the corresponding frame on the left, the interactive 4D visualization for the whole sequence in the middle, and the 2D projection of the model's answer on the right, overlayed as a blue dot on the frame corresponding to the query. Note that the agent does not receive that frame and only operates on the 4D representation.<br> <strong><i>To interpret the 4D visualization correctly: at the specific timestep, structures and interaction points that the agent requested via a tool call will light up in blue and red and their 3D state at that time will remain frozen and visible as the sequence progresses. You may use the arrow keys or the timeline scrollbar to easily find the relevant timestep. For the agent, only this state matters for the spatial queries. Interaction points are highlighted with a red dot in 3D. We also project the point into the 2D frame, as shown in the images on the right, which allows for comparison with 2D baselines.</i></strong></p>
 
       <p class="reasoning-query">Where is the grasper in the back gripping the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video24_09676/images/frame_000060.png" alt="GT frame video24_09676"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video24_09676_frame_000060.png" alt="GT frame video24_09676"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -294,14 +295,14 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video24_09676/000060_video24_09676_spatial_0_where_is_the_grasper_in_the_back_gripping_the_gallbladder.png" alt="Prediction spatial 0"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000060_video24_09676_spatial_0_where_is_the_grasper_in_the_back_gripping_the_gallbladder.png" alt="Prediction spatial 0"></div>
         </div>
       </div>
       <p class="reasoning-query">Where is the L-hook coagulating the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video12_19980/images/frame_000072.png" alt="GT frame video12_19980"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video12_19980_frame_000072.png" alt="GT frame video12_19980"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -309,14 +310,14 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video12_19980/000072_video12_19980_spatial_0_where_is_the_l-hook_coagulating_the_gallbladder.png" alt="Prediction"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000072_video12_19980_spatial_0_where_is_the_l-hook_coagulating_the_gallbladder.png" alt="Prediction"></div>
         </div>
       </div>
       <p class="reasoning-query">Where is the grasper behind the L-hook holding the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video12_19500/images/frame_000028.png" alt="GT frame video12_19500"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video12_19500_frame_000028.png" alt="GT frame video12_19500"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -324,14 +325,14 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video12_19500/000028_video12_19500_spatial_1_where_is_the_grasper_behind_the_l-hook_holding_the_gallbladder.png" alt="Prediction"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000028_video12_19500_spatial_1_where_is_the_grasper_behind_the_l-hook_holding_the_gallbladder.png" alt="Prediction"></div>
         </div>
       </div>
       <p class="reasoning-query">Where does the grasper grip the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video17_01803/images/frame_000052.png" alt="GT frame video17_01803"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video17_01803_frame_000052.png" alt="GT frame video17_01803"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -339,14 +340,14 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video17_01803/000052_video17_01803_spatial_0_where_does_the_grasper_grip_the_gallbladder.png" alt="Prediction"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000052_video17_01803_spatial_0_where_does_the_grasper_grip_the_gallbladder.png" alt="Prediction"></div>
         </div>
       </div>
       <p class="reasoning-query">Where is the L-hook hooked into the connective tissue of the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video55_00588/images/frame_000064.png" alt="GT frame video55_00588"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video55_00588_frame_000064.png" alt="GT frame video55_00588"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -354,14 +355,14 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video55_00588/000064_video55_00588_spatial_2_where_is_the_l-hook_hooked_into_the_connective_tissue_of_the_gallbladder.png" alt="Prediction"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000064_video55_00588_spatial_2_where_is_the_l-hook_hooked_into_the_connective_tissue_of_the_gallbladder.png" alt="Prediction"></div>
         </div>
       </div>
       <!-- <p class="reasoning-query">Where is the front grasper gripping the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video52_02826/images/frame_000016.png" alt="GT frame video52_02826"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video52_02826_frame_000016.png" alt="GT frame video52_02826"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -369,14 +370,14 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video52_02826/000016_video52_02826_spatial_0_where_is_the_front_grasper_gripping_the_gallbladder.png" alt="Prediction front"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000016_video52_02826_spatial_0_where_is_the_front_grasper_gripping_the_gallbladder.png" alt="Prediction front"></div>
         </div>
       </div>
       <p class="reasoning-query">Where is the back grasper gripping the gallbladder?</p>
       <div class="reasoning-row">
         <div>
           <div class="reasoning-col-label">Frame at query time</div>
-          <div class="reasoning-media reasoning-viz-tile"><img src="./data/preprocessed/clean/video52_02826/images/frame_000016.png" alt="GT frame video52_02826"></div>
+          <div class="reasoning-media reasoning-viz-tile"><img src="./project_page/assets/images/video52_02826_frame_000016.png" alt="GT frame video52_02826"></div>
         </div>
         <div>
           <div class="reasoning-col-label">4D Visualization</div>
@@ -384,7 +385,7 @@
         </div>
         <div>
           <div class="reasoning-col-label">Predicted 2D point</div>
-          <div class="reasoning-pred reasoning-viz-tile"><img src="./output/final/predictions_final/spatial_viz/graph_agent_semantics/video52_02826/000016_video52_02826_spatial_1_where_is_the_back_grasper_gripping_the_gallbladder.png" alt="Prediction back"></div>
+          <div class="reasoning-pred reasoning-viz-tile"><img src="./project_page/assets/images/000016_video52_02826_spatial_1_where_is_the_back_grasper_gripping_the_gallbladder.png" alt="Prediction back"></div>
         </div>
       </div> -->
 
@@ -396,7 +397,7 @@
         <div>
           <div class="reasoning-col-label">Video</div>
           <div class="reasoning-media reasoning-viz-tile">
-            <video playsinline controls muted loop preload="metadata" poster="./data/preprocessed/clean/video01_28580/images/frame_000000.png">
+            <video playsinline controls muted loop preload="metadata" poster="./project_page/assets/images/video01_28580_frame_000000.png">
               <source src="./project_page/reasoning_media/video01_28580_25fps.mp4" type="video/mp4">
             </video>
           </div>

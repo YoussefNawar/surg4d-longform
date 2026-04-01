@@ -1,23 +1,25 @@
 <div align="center">
 
-# Surg4D: A 4D Representation for Training-Free Agentic Reasoning from Monocular Laparascopic Video
+# A 4D Representation for Training-Free Agentic Reasoning from Monocular Laparascopic Video
 
-### conference 2026
 
-Maximilian Fehrentz · and others
+Maximilian Fehrentz*<sup>1,2,4</sup> · Nicolas Stellwag*<sup>2</sup> · Robert Wiebe<sup>2</sup> · Nicole Thorisch<sup>2</sup> · Fabian Grob<sup>2</sup> · Patrick Remerscheid<sup>2</sup> · Ken-Joel Simmoteit<sup>2</sup> · Benjamin D. Killeen<sup>1,4</sup> · Christian Heiliger<sup>3</sup> · Nassir Navab<sup>1,4</sup>
 
-**Computer Aided Medical Procedures, TU Munich**
+**<sup>1</sup>Computer Aided Medical Procedures, TU Munich**
 
-**Department of General, Visceral, and Transplantation Surgery, Hospital of the LMU Munich**
+**<sup>2</sup>TUM.ai**
 
-**TUM.ai (Student Initiative)**
+**<sup>3</sup>University Hospital of Ludwig Maximilian University (LMU)
+Munich**
 
-### [Project Page](https://example.com) | [Paper](https://example.com) | [Dataset](https://example.com)
+**<sup>4</sup>Munich Center for Machine Learning**
+
+### [Project Page](https://tum-ai.github.io/surg4d/) | [Paper](https://example.com) | [Dataset](https://github.com/tum-ai/surg4d)
 
 </div>
 
 ---
-Official implementation of **Surg4D** ([conference] 2026).
+Official implementation of "A 4D Representation for Training-Free Agentic Reasoning from Monocular Laparascopic Video".
 
 ## Installation & Setup
 
@@ -92,7 +94,7 @@ Or the whole pipeline, including all ablations:
 bash ablate_all.sh
 ```
 
-## Citation
+<!-- ## Citation
 
 If you find this work useful, please cite:
 
@@ -105,7 +107,7 @@ If you find this work useful, please cite:
   year={2025},
   organization={Springer}
 }
-```
+``` -->
 
 ## 📧 Contact
 
