@@ -29,7 +29,7 @@
   margin-top: 4rem;
   margin-bottom: 1rem;
   text-align: center;
-  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  font-size: clamp(1.25rem, 2.35vw, 2rem);
   font-weight: 700;
 }
 
@@ -88,6 +88,38 @@
   color: rgba(255, 255, 255, 0.95);
   font-weight: 400;
   font-style: italic;
+}
+
+.reasoning-infobox {
+  width: 92%;
+  max-width: 960px;
+  margin: 0.5rem auto 1.8rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+.reasoning-infobox-title {
+  margin: 0 0 0.45rem;
+  font-size: clamp(0.9rem, 1.2vw, 1rem);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.reasoning-infobox-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  list-style: disc;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: clamp(0.84rem, 1.1vw, 0.97rem);
+  line-height: 1.52;
+}
+
+.reasoning-infobox-list li + li {
+  margin-top: 0.28rem;
 }
 
 /* Three tiles: GT / 4D visualization / pred — columns stretch to one row height */
@@ -308,5 +340,14 @@ pre.reasoning-trace-below.reasoning-trace-raw::after {
   .rerun-overview-triple .rerun-overview-video-tile {
     min-height: 50vh;
     height: 50vh;
+  }
+
+  .reasoning-infobox {
+    padding: 0.85rem 0.9rem;
+    margin-bottom: 1.4rem;
+  }
+
+  .reasoning-infobox-list {
+    padding-left: 1rem;
   }
 }

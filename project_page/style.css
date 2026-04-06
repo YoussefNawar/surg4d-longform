@@ -347,8 +347,14 @@ footer {
     margin: 0.85rem 0 0;
 }
 
-#cover.cover-unified .cover-unified__authors a {
+#cover.cover-unified .cover-unified__authors a,
+#cover.cover-unified .cover-unified__authors a:visited,
+#cover.cover-unified .cover-unified__authors a:focus,
+#cover.cover-unified .cover-unified__authors a:active {
     color: hsl(204, 86%, 68%);
+    background-color: transparent;
+    text-decoration: none;
+    outline: none;
 }
 
 #cover.cover-unified .cover-unified__authors a:hover {
@@ -620,30 +626,6 @@ pointer-events: none;
 z-index: 1000;
 } 
 */
-
-.section-nav {
-    position: fixed;
-    top: 50%;
-    right: 0.8vh;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 1vh;
-    z-index: 100;
-}
-
-.section-nav .dot {
-    width: 1.3vh;
-    height: 1.3vh;
-    border-radius: 50%;
-    background: #ccc;
-    transition: background 0.3s ease;
-}
-
-.section-nav .dot:hover,
-.section-nav .dot.active {
-    background: #36e9e6;
-}
 
 .pad {
     width: 300px;

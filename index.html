@@ -92,15 +92,6 @@
 
   <div class="scroll-container">
 
-    <div class="section-nav">
-      <!-- TODO: fix this!-->
-      <a href="#cover" class="dot active" title="Cover"></a>
-      <a href="#intro" class="dot" title="Introduction"></a>
-      <a href="#method" class="dot" title="Method"></a>
-      <a href="#results" class="dot" title="Results"></a>
-      <a href="#miscellaneous" class="dot" title="Miscellaneous"></a>
-    </div>
-
     <!-- Outside #cover (is-hidden-touch). No Bulma .navbar here — it defaults to white bg and can expand to a full-height menu on small widths. -->
     <div id="mobile-top-bar" class="mobile-top-links is-hidden-desktop myfont" aria-label="Paper, code, and data links" style="background-color:#000;">
       <a href="https://arxiv.org/pdf/2604.00867" style="color:#fff;">Paper</a>
@@ -130,7 +121,7 @@
           <div class="container has-text-centered" style="max-width: 100%; width: 100%;">
             <h2 class="cover-unified__authors is-2 is-size-4-mobile myfont">
               <span class="myfont"><a href="https://scholar.google.com/citations?user=YHRYsjAAAAAJ&amp;hl=en">Maximilian Fehrentz*<sup class="is-size-6-mobile">1,2,4</sup></a>, </span>
-              <span class="myfont"><a href="https://www.linkedin.com/in/nicolasstellwag/">Nicolas Stellwag*<sup class="is-size-6-mobile">2</sup></a>, </span>
+              <span class="myfont"><a href="https://scholar.google.com/citations?user=aWEM8QUAAAAJ&hl=en">Nicolas Stellwag*<sup class="is-size-6-mobile">2</sup></a>, </span>
               <span class="myfont"><a href="https://www.linkedin.com/in/robert-wiebe/">Robert Wiebe<sup class="is-size-6-mobile">2</sup></a>, </span>
               <span class="myfont"><a href="https://www.linkedin.com/in/nicole-thorisch/">Nicole Thorisch<sup class="is-size-6-mobile">2</sup></a>, </span>
               <span class="myfont"><a href="https://scholar.google.com/citations?user=eMgwc9gAAAAJ&amp;hl=en">Fabian Grob<sup class="is-size-6-mobile">2</sup></a>, </span>
@@ -273,10 +264,17 @@
       <div class="content is-6 is-size-6-mobile reasoning-section-lead">
         We evaluate on 134 clinically motivated queries that require spatiotemporal reasoning over tool–tissue interaction. In particular, we want to understand how tissue is manipulated as the decision-making on grasping points, retraction directions, and dissection locations is a key indicator for surgical intelligence. Tasks are <em>spatial</em> (where an interaction occurs in 3D at a timestep), <em>temporal</em> (when a query holds), and <em>directional</em> (how motion evolves).
       </div>
-      <h3 class="reasoning-nav-subhead"><em>How To Navigate Below 4D Scenes</em></h3>
-      <p class="reasoning-nav-text">
-        Each row below shows the monocular input clip (left), the RGB 4D reconstruction (center), and the same geometry with semantic instance colors (right). The 4D viewers are interactive: pan by holding left-click and moving your cursor, translate the camera by holding left- and right-click, rotate around the camera axis by holding option, and zoom by scrolling. With space, you can start and stop playback. With the arrow keys, you can step frame by frame. You may also use the control bar to loop or scrub the timeline. Loading the Rerun files may take a moment.
-      </p>
+      <div class="reasoning-infobox">
+        <p class="reasoning-infobox-title"><em>How To Navigate Below 4D Scenes</em></p>
+        <ul class="reasoning-infobox-list">
+          <li>Each row below shows the monocular input clip (left), the RGB 4D reconstruction (center), and the same geometry with semantic instance colors (right).</li>
+          <li>The 4D viewers are interactive: pan by holding left-click and moving your cursor, translate the camera by holding left- and right-click, rotate around the camera axis by holding option, and zoom by scrolling.</li>
+          <li>With space, you can start and stop playback.</li>
+          <li>With the arrow keys, you can step frame by frame.</li>
+          <li>You may also use the control bar to loop or scrub the timeline.</li>
+          <li>Loading the Rerun files may take a moment.</li>
+        </ul>
+      </div>
 
       <div style="text-align: center; margin-top: 3rem;">
         <h2 class="reasoning-subhead reasoning-subhead-center reasoning-task-header">
@@ -341,7 +339,18 @@
       </div>
 
       <h2 class="reasoning-subhead reasoning-subhead-center reasoning-task-header">Spatial grounding</h2>
-      <p class="reasoning-storyline reasoning-storyline-center">To perform spatial grounding in 3D, we pose a query for a specific timestep. Below examples show the corresponding frame on the left, the interactive 4D visualization for the whole sequence in the middle, and the 2D projection of the model's answer on the right, overlayed as a blue dot on the frame corresponding to the query. Note that the agent does not receive that frame and only operates on the 4D representation.<br> <strong><i>To interpret the 4D visualization correctly: at the specific timestep, structures and interaction points that the agent requested via a tool call will light up in blue and red and their 3D state at that time will remain frozen and visible as the sequence progresses. You may use the arrow keys or the timeline scrollbar to easily find the relevant timestep. For the agent, only this state matters for the spatial queries. Interaction points are highlighted with a red dot in 3D. We also project the point into the 2D frame, as shown in the images on the right, which allows for comparison with 2D baselines.</i></strong></p>
+      <p class="reasoning-storyline reasoning-storyline-center">To perform spatial grounding in 3D, we pose a query for a specific timestep. Below examples show the corresponding frame on the left, the interactive 4D visualization for the whole sequence in the middle, and the 2D projection of the model's answer on the right, overlayed as a blue dot on the frame corresponding to the query. Note that the agent does not receive that frame and only operates on the 4D representation.</p>
+      <div class="reasoning-infobox">
+        <p class="reasoning-infobox-title">To interpret the 4D visualization correctly:</p>
+        <ul class="reasoning-infobox-list">
+          <li>At the specific timestep, structures and interaction points that the agent requested via a tool call will light up in blue and red.</li>
+          <li>Their 3D state at that time will remain frozen and visible as the sequence progresses.</li>
+          <li>You may use the arrow keys or the timeline scrollbar to easily find the relevant timestep.</li>
+          <li>For the agent, only this state matters for the spatial queries.</li>
+          <li>Interaction points are highlighted with a red dot in 3D.</li>
+          <li>We also project the point into the 2D frame, as shown in the images on the right, which allows for comparison with 2D baselines.</li>
+        </ul>
+      </div>
 
       <p class="reasoning-query">Where is the grasper in the back gripping the gallbladder?</p>
       <div class="reasoning-row">
@@ -450,7 +459,15 @@
       </div> -->
 
       <h2 class="reasoning-subhead reasoning-subhead-center reasoning-task-header">Temporal grounding</h2>
-      <p class="reasoning-storyline reasoning-storyline-center">For temporal grounding, we ask the agent to either determine the starting point or the duration of a query. All temporal queries require spatial reasoning as well, as shown in the example below.<br><strong><i>To interpret the visualization, the relevant structures the agent interacted with via tool calls are again highlighted in dark blue and red. Here, they were requested over the whole sequence and distance and overlap scores were used. Refer to the partial reasoning trace below to understand how the agent used that information to answer the query.</i></strong></p>
+      <p class="reasoning-storyline reasoning-storyline-center">For temporal grounding, we ask the agent to either determine the starting point or the duration of a query. All temporal queries require spatial reasoning as well, as shown in the example below.</p>
+      <div class="reasoning-infobox">
+        <p class="reasoning-infobox-title">To interpret the visualization:</p>
+        <ul class="reasoning-infobox-list">
+          <li>The relevant structures the agent interacted with via tool calls are again highlighted in dark blue and red.</li>
+          <li>Here, they were requested over the whole sequence and distance and overlap scores were used.</li>
+          <li>Refer to the partial reasoning trace below to understand how the agent used that information to answer the query.</li>
+        </ul>
+      </div>
 
       <p class="reasoning-query">When is the L-hook touching the gallbladder?</p>
       <div class="reasoning-row reasoning-row-2">
@@ -475,7 +492,17 @@ The minimal distance values (0.1 cm) indicate contact. The distance starts incre
 
 
       <h2 class="reasoning-subhead reasoning-subhead-center reasoning-task-header">Directional reasoning</h2>
-      <p class="reasoning-storyline reasoning-storyline-center">It is a key surgical skill to apply traction and counter-traction by grasping and retracting tissue to create tension on the dissection plane. Therefore, to understand subtle tool-tissue interactions, we explore reasoning on motions unfolding over time and space. We evaluate on direct manipulation such as a tool manipulating anatomy, but also on the effect on secondary, surrounding tissue.<br><strong><i>To interpret the 4D visualizations and reasoning traces correctly, beware that the queries apply to a specific time window and the agent primarly uses tools to get 4D trajectories for the relevant window. The agent operates directly on trajectories but our output format is simplified to unit 3D direction vectors to allow fair comparison with 2D baselines that do not have access to explicit 3D coordinates. Start and end 3D points that mark a trajectory as computed by the used tool are visualized with start and end labels. By the presence of the labels, you can infer the relevant time window that the query refers to. You may also scrub the timeline and use the arrow keys to navigate the video for a closer look.</i></strong></p>
+      <p class="reasoning-storyline reasoning-storyline-center">It is a key surgical skill to apply traction and counter-traction by grasping and retracting tissue to create tension on the dissection plane. Therefore, to understand subtle tool-tissue interactions, we explore reasoning on motions unfolding over time and space. We evaluate on direct manipulation such as a tool manipulating anatomy, but also on the effect on secondary, surrounding tissue.</p>
+      <div class="reasoning-infobox">
+        <p class="reasoning-infobox-title">To interpret the 4D visualizations and reasoning traces correctly:</p>
+        <ul class="reasoning-infobox-list">
+          <li>Beware that the queries apply to a specific time window and the agent primarly uses tools to get 4D trajectories for the relevant window.</li>
+          <li>The agent operates directly on trajectories but our output format is simplified to unit 3D direction vectors to allow fair comparison with 2D baselines that do not have access to explicit 3D coordinates.</li>
+          <li>Start and end 3D points that mark a trajectory as computed by the used tool are visualized with start and end labels.</li>
+          <li>By the presence of the labels, you can infer the relevant time window that the query refers to.</li>
+          <li>You may also scrub the timeline and use the arrow keys to navigate the video for a closer look.</li>
+        </ul>
+      </div>
 
       <p class="reasoning-query">In which direction is the grasper pulling the gallbladder?</p>
       <div class="reasoning-row reasoning-row-2">
@@ -693,3 +720,5 @@ So the direction vector should be {&quot;x&quot;: 1, &quot;y&quot;: -1, &quot;z&
       });
     })();
     </script>
+</body>
+</html>
