@@ -502,13 +502,6 @@ body {
     font-family: 'Linux Biolium', sans-serif;
 }
 
-@media screen and (max-width: 1023px) {
-    html,
-    body {
-        scroll-behavior: auto;
-    }
-}
-
 .scroll-container {
     height: auto;
     overflow: visible;

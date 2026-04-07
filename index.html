@@ -690,8 +690,7 @@ So the direction vector should be {&quot;x&quot;: 1, &quot;y&quot;: -1, &quot;z&
           const target = document.querySelector(a.getAttribute('href'));
           if (target) {
             e.preventDefault();
-            const isMobile = window.matchMedia('(max-width: 1023px)').matches;
-            target.scrollIntoView({ behavior: isMobile ? 'auto' : 'smooth', block: 'start' });
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
           }
         });
       });

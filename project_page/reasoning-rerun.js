@@ -41,13 +41,8 @@ function schedulePanelHideRetries(viewer, host) {
   }
 }
 
-const starting = new WeakSet();
+const started = new WeakSet();
 const viewers = new WeakMap();
-const resizeObservers = new WeakMap();
-const hideDebounceTimers = new WeakMap();
-const unloadTimers = new WeakMap();
-
-const OFFSCREEN_UNLOAD_MS = 15000;
 
 let queue = Promise.resolve();
 
@@ -87,64 +82,6 @@ function notifyViewerResize(host) {
   stretchCanvas(host);
 }
 
-function clearUnloadTimer(host) {
-  const t = unloadTimers.get(host);
-  if (t) {
-    clearTimeout(t);
-    unloadTimers.delete(host);
-  }
-}
-
-function callViewerDispose(viewer) {
-  for (const name of ["destroy", "dispose", "shutdown", "stop", "close"]) {
-    if (typeof viewer[name] === "function") {
-      try {
-        viewer[name]();
-      } catch (_) {
-        /* ignore */
-      }
-      break;
-    }
-  }
-}
-
-function destroyHostViewer(host) {
-  clearUnloadTimer(host);
-
-  const hideDebounce = hideDebounceTimers.get(host);
-  if (hideDebounce) {
-    clearTimeout(hideDebounce);
-    hideDebounceTimers.delete(host);
-  }
-
-  const ro = resizeObservers.get(host);
-  if (ro) {
-    try {
-      ro.disconnect();
-    } catch (_) {
-      /* ignore */
-    }
-    resizeObservers.delete(host);
-  }
-
-  const v = viewers.get(host);
-  if (v) {
-    callViewerDispose(v);
-    viewers.delete(host);
-  }
-
-  host.textContent = "";
-}
-
-function scheduleOffscreenUnload(host) {
-  if (!viewers.has(host)) return;
-  clearUnloadTimer(host);
-  const t = setTimeout(() => {
-    destroyHostViewer(host);
-  }, OFFSCREEN_UNLOAD_MS);
-  unloadTimers.set(host, t);
-}
-
 async function waitForLayout(host) {
   for (let i = 0; i < 5; i++) {
     const r = host.getBoundingClientRect();
@@ -155,16 +92,15 @@ async function waitForLayout(host) {
 
 function scheduleStart(host) {
   queue = queue.then(async () => {
-    if (!host.isConnected || viewers.has(host) || starting.has(host)) return;
+    if (!host.isConnected || started.has(host)) return;
     const rawUrl = host.getAttribute("data-rrd-url");
     if (!rawUrl) return;
     // Newer web-viewer versions can mis-handle "./..." inputs; resolve explicitly.
     const url = new URL(rawUrl, window.location.href).href;
-    starting.add(host);
+    started.add(host);
 
     try {
       await waitForLayout(host);
-      clearUnloadTimer(host);
       const dims = pixelBox(host);
       const v = new WebViewer();
       await v.start(url, host, { ...baseOpts, ...dims });
@@ -177,20 +113,16 @@ function scheduleStart(host) {
       stretchCanvas(host);
       notifyViewerResize(host);
 
+      let hideDebounce = null;
       const ro = new ResizeObserver(() => {
         stretchCanvas(host);
         notifyViewerResize(host);
-        const hideDebounce = hideDebounceTimers.get(host);
         clearTimeout(hideDebounce);
-        const nextHideDebounce = setTimeout(() => applyPanelHides(v, host), 200);
-        hideDebounceTimers.set(host, nextHideDebounce);
+        hideDebounce = setTimeout(() => applyPanelHides(v, host), 200);
       });
       ro.observe(host);
-      resizeObservers.set(host, ro);
     } catch (e) {
       console.warn("Rerun viewer failed:", host.id || host.className, e);
-    } finally {
-      starting.delete(host);
     }
   });
 }
@@ -198,13 +130,10 @@ function scheduleStart(host) {
 const io = new IntersectionObserver(
   (entries) => {
     for (const ent of entries) {
+      if (!ent.isIntersecting) continue;
       const host = ent.target;
-      if (ent.isIntersecting) {
-        clearUnloadTimer(host);
-        scheduleStart(host);
-      } else {
-        scheduleOffscreenUnload(host);
-      }
+      io.unobserve(host);
+      scheduleStart(host);
     }
   },
   { root: null, rootMargin: "120px 0px", threshold: 0.05 }
