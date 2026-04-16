@@ -9,9 +9,8 @@ defaults:
   - compute_metrics: default
   - _self_
   
-cholecseg8k_root: data/cholecseg8k
-
-preprocessed_root: data/preprocessed/clean
+# cholecseg8k_root: video01_00000
+preprocessed_root: /home/data/tumai/splatgraph/data/preprocessed/clean/test_output/
 output_root: output/final
 
 seed: 1234

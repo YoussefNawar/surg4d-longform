@@ -356,6 +356,7 @@ def main(cfg: DictConfig):
         OmegaConf.save(cfg, config_dump)
 
     for clip in tqdm(cfg.clips, desc="Processing clips", unit="clip"):
+        print(clip)
         preprocess(clip, cfg)
 
 

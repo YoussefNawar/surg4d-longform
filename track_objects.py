@@ -14,10 +14,12 @@ from tqdm import tqdm
 import hydra
 from loguru import logger
 import random
+import os
 
 # Import CoTracker3 utilities
 from utils.cotracker_utils import (
     track_control_points,
+    track_points_online,
     lift_control_points_to_3d,
     compute_gaussian_control_point_associations,
 )
@@ -503,8 +505,10 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
     semantic_mask_dir = clip_dir / cfg.track_objects.semantic_mask_subdir
 
     # Output directory for CoTracker data
-    cotracker_dir = clip_dir / cfg.track_objects.cotracker_subdir
-    cotracker_dir.mkdir(parents=True, exist_ok=True)
+    # cotracker_dir = clip_dir / cfg.track_objects.cotracker_subdir
+    cotracker_dir = Path('cotracker_dir')
+    # os.makedirs(cotracker_dir, exist_ok = True)
+    # cotracker_dir.mkdir(parents=True, exist_ok=True)
 
     if not images_dir.exists():
         logger.error(f"Images directory not found: {images_dir}")
@@ -538,15 +542,21 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
 
     # Track control points across all frames
     logger.info("Running CoTracker3...")
-    control_points_2d, visibility = track_control_points(
+    # control_points_2d, visibility = track_control_points(
+    #     image_files,
+    #     n_points_per_frame=cfg.track_objects.cotracker_n_points_per_frame,
+    #     init_from_middle_frame_only=not cfg.track_objects.cotracker_init_from_multiple_frames,
+    #     save_dir=cotracker_dir,
+    # )
+    # print(image_files)
+    control_points_2d, visibility = track_points_online(
         image_files,
-        n_points_per_frame=cfg.track_objects.cotracker_n_points_per_frame,
-        init_from_middle_frame_only=not cfg.track_objects.cotracker_init_from_multiple_frames,
-        save_dir=cotracker_dir,
+        semantic_mask_dir,
+        cotracker_dir,
     )
     # shape of control points: (T, N_total, 2) where N_total = n_points_per_frame * 3
     # shape of visibility: (T, N_grid), those are boolean values!
-
+    print(control_points_2d.shape, visibility.shape)
     # Lift control points to 3D using DA3 depth and camera parameters
     logger.info("Lifting control points to 3D...")
     depth_jump_threshold = (
@@ -563,6 +573,7 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
         fill_occlusions=cfg.track_objects.cotracker_fill_occlusions,
         save_dir=cotracker_dir,
     )
+    print(control_points_3d.shape)
     # control_points_3d: (T, N_valid, 3) - only permanently valid points
     # control_points_2d: (T, N_valid, 2) - filtered to match
 

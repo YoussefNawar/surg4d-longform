@@ -16,9 +16,9 @@ PYTHONNOUSERSITE = "1"
 
 [dependencies]
 python = "==3.10"
-cuda-toolkit = "12.8.*"
-cuda-version = "==12.8"
-cuda-driver-dev = "12.8.*"
+cuda-toolkit = "12.1.*"
+cuda-version = "==12.1"
+cuda-driver-dev = "12.1.*"
 libxcrypt = "*"
 uv = ">=0.1.0"
 libjpeg-turbo = ">=3.1.2,<4"
@@ -27,8 +27,8 @@ libjpeg-turbo = ">=3.1.2,<4"
 # Initialize git submodules
 init-submodules = "git submodule update --init --recursive"
 
-# PyTorch installation for CUDA 12.8
-install-pytorch = "uv pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128"
+# PyTorch installation for CUDA 12.1
+install-pytorch = "uv pip install torch==2.3.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
 
 # vLLM installation from official PyPI
 install-vllm-deps = "uv pip install six==1.17.0 && uv pip install 'setuptools==79.0.1'"

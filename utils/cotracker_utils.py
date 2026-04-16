@@ -10,10 +10,226 @@ from typing import Optional, Dict, Tuple, List
 from loguru import logger
 import rerun as rr
 import cv2
-from cotracker.predictor import CoTrackerPredictor
+from cotracker.predictor import CoTrackerPredictor, CoTrackerOnlinePredictor
 from cotracker.utils.visualizer import Visualizer
 from utils.da3_geometry_utils import load_da3_geometry
+import os
+import torch.nn.functional as F
+from tqdm import tqdm
 
+def semantic_to_binary_masks(semantic_mask):
+    """
+    Convert a semantic mask to a list of binary masks and labels.
+    
+    Args:
+        semantic_mask: np.ndarray of shape (H, W) with integer class labels
+    
+    Returns:
+        binary_masks: list of np.ndarray of shape (H, W), dtype bool
+        labels: list of int class labels
+    """
+    labels = np.unique(semantic_mask)
+    binary_masks = [(semantic_mask == label) for label in labels]
+    return {'masks': np.array(binary_masks),"labels": labels}
+
+def read_video_from_dir(dir_path):
+    # file_names = sorted([f for f in os.listdir(dir_path) if f.endswith(('.png', '.jpg', '.jpeg'))])
+    file_names = dir_path
+    print(f"Reading video with {len(file_names)} Frames")
+    # Using a list comprehension for efficiency before stacking
+    frames = [np.array(Image.open(f)) for f in file_names]
+    return np.stack(frames), file_names
+
+def track_semantic_reappearances(frame_data, patience=5, area_threshold=10000):
+    """
+    Records only the first appearance or reappearance of a class 
+    after a 'patience' period of absence.
+    
+    Args:
+        frame_data: List of dicts [{'labels': [...], 'masks': [...]}, ...]
+        patience: Minimum frames of absence required to count as a "reappearance"
+        area_threshold: Minimum area of a mask to be considered for tracking
+    """
+    tracked_output = []
+    
+    # Hashmap structure: { label: last_seen_frame_index }
+    last_seen_registry = {}
+
+    for frame_idx, data in enumerate(frame_data):
+        current_masks = data.get('masks', [])
+        current_labels = data.get('labels', [])
+        # print(current_labels)
+        for mask, label in zip(current_masks, current_labels):
+            if label != 5:
+                continue
+            # Case 1: Brand new class appearance
+            # mask_area = np.sum(mask)
+            
+            # if mask_area < area_threshold:
+            #     continue
+            if label not in last_seen_registry:
+                tracked_output.append((mask, label, frame_idx))
+                last_seen_registry[label] = frame_idx
+            
+            else:
+                gap = frame_idx - last_seen_registry[label]
+                
+                # Case 2: Reappearance after a significant gap (re-identification)
+                # We use > patience because if it's <= patience, we consider it
+                # the "same" continuous appearance.
+                if gap > patience:
+                    tracked_output.append((mask, label, frame_idx))
+                
+                # Always update the registry to the most recent frame 
+                # so the gap is calculated from the absolute last sighting
+                last_seen_registry[label] = frame_idx
+
+    return tracked_output
+
+def get_multi_frame_queries(segm_mask, frame_idx, grid_size=50, interp_shape=(400, 800)):
+    """
+    Args:
+        masks_by_frame: Dict {frame_idx: mask_tensor} where mask is [1, 1, H, W]
+        frame_idx: The index of the frame for which to create queries
+        grid_size: Density of the starting grid
+        interp_shape: The resolution CoTracker is processing at
+    """
+    # for segm_mask in masks_by_frame['masks']:
+        # 1. Create a uniform grid for this specific frame
+        # grid_pts shape: [1, N, 2] -> (x, y)
+    # print(segm_mask.shape)
+    segm_mask = torch.tensor(segm_mask)
+    x = torch.linspace(0, interp_shape[1] - 1, grid_size)
+    y = torch.linspace(0, interp_shape[0] - 1, grid_size,)
+    grid_y, grid_x = torch.meshgrid(y, x, indexing='ij')
+    grid_pts = torch.stack([grid_x, grid_y], dim=-1).reshape(1, -1, 2)
+    # 3. Filter points: Keep only those that fall inside the mask
+    # We index the mask [H, W] using the rounded (x, y) coordinates
+    point_mask = segm_mask[
+        (grid_pts[0, :, 1]).round().long(),
+        (grid_pts[0, :, 0]).round().long(),
+    ].bool()
+    
+    frame_grid_pts = grid_pts[:, point_mask] # Shape [1, n_points_in_mask, 2]
+
+    # 4. Add the time (frame_idx) column
+    # Result shape: [1, n_points_in_mask, 3] -> (t, x, y)
+    frame_queries = torch.cat(
+        [torch.ones_like(frame_grid_pts[:, :, :1]) * float(frame_idx), frame_grid_pts],
+        dim=2,
+    )    
+    return frame_queries.squeeze(0)
+
+def get_queries_from_masks(dir_path,grid_size, patience = 5):
+    file_names = sorted([f for f in os.listdir(dir_path)])
+    print(f"Reading Masks with {len(file_names)} frames from {dir_path}")
+    # Load all masks
+    all_masks = [semantic_to_binary_masks(np.load(os.path.join(dir_path, f))) for f in file_names]
+    # all_masks = [dict(np.load(os.path.join(dir_path, f), allow_pickle=True)) for f in file_names]
+    
+    # Resize masks to 255x255
+    # for mask_dict in all_masks:
+    #     masks = mask_dict['masks']  # Assuming shape [B, 1, H, W]
+    #     mask_tensor = torch.from_numpy(masks).float()
+    #     # mask_tensor = F.interpolate(mask_tensor, size=(255, 255), mode='nearest')
+    #     mask_dict['masks'] = mask_tensor.numpy()
+    # Keep track of unique masks: add first mask, then only add when labels change
+    tracks = track_semantic_reappearances(all_masks, patience = patience)
+    print(f"Unique masks after tracking reappearances: {len(tracks)}")
+    # print(tracks)
+    # Process only unique masks
+    all_queries = []
+    for  mask, label , i  in tracks:
+        # print(np.sum(mask) , label, i)
+        H , W = mask.shape
+        queries = get_multi_frame_queries(mask, i , grid_size = grid_size, interp_shape = (H,W))
+        # print(queries)
+        all_queries.append(queries)
+    # print(all_queries)
+    all_queries = torch.cat(all_queries, dim=0)
+    # print(all_queries.shape)
+    # queries = [get_multi_frame_queries(mask, i, interp_shape=(255, 255)) for mask, _, i  in tracks]
+    # queries = torch.cat(queries, dim=0)
+    # print(all_queries.shape)
+    return all_queries
+
+def track_points_online(
+    image_files: list,
+    masks_files: list,
+    save_dir: Path = None,
+    checkpoint: Path = None,
+    patience: int = 5,
+    grid_size: int = 50,
+):
+    frames, file_names = read_video_from_dir(image_files)
+    if checkpoint is not None:
+        model = CoTrackerOnlinePredictor(checkpoint)
+    else:
+        model = torch.hub.load("facebookresearch/co-tracker", "cotracker3_online")
+    model = model.to('cuda')
+    # 1. Load Video
+    # 2. Load Mask if provided (Assuming mask for the query frame)
+    if masks_files is not None:
+        queries = get_queries_from_masks(masks_files, grid_size, patience).to('cuda')
+
+    def _process_step(window_frames, is_first_step, grid_size, grid_query_frame, queries=None):
+        video_chunk = (
+            torch.tensor(
+                np.stack(window_frames[-model.step * 2 :])
+            )
+            .float()
+            .permute(0, 3, 1, 2)[None].to('cuda')
+        ) 
+        return model(
+            video_chunk,
+            queries=queries,
+            is_first_step=is_first_step,
+            grid_size=grid_size,
+            grid_query_frame=grid_query_frame,
+            add_support_grid=False
+        )
+
+    # Iterating over video frames
+    window_frames = []
+    is_first_step = True
+    all_tracks = []
+    all_vis = []
+    print('Queries shape:', queries.shape)
+    for i, frame in enumerate(tqdm(frames)):        
+        # Process whenever we hit a window boundary
+        if i % model.step == 0 and i != 0:
+            pred_tracks, pred_visibility = _process_step(
+                window_frames,
+                is_first_step,
+                grid_size=grid_size,
+                grid_query_frame=0,
+                queries = queries[None] if is_first_step else None
+            )
+            is_first_step = False
+
+        window_frames.append(frame)
+    pred_tracks, pred_visibility = _process_step(
+        window_frames[-(i % model.step) - model.step - 1 :],
+        is_first_step,
+        grid_size=grid_size,
+        grid_query_frame=0,
+    )
+    print(f"Tracks computed: {pred_tracks.shape}")
+
+    # Visualize
+    video = torch.tensor(np.stack(window_frames)).permute(
+        0, 3, 1, 2
+    )[None]    
+
+    visualizer = Visualizer(save_dir=save_dir, pad_value=25)
+    visualizer.visualize(
+        video= video,
+        tracks=pred_tracks,
+        visibility=pred_visibility,
+        query_frame=0,
+        filename="video",
+    )
+    return pred_tracks.squeeze(0) , pred_visibility.squeeze(0)
 
 def track_control_points(
     image_files: list,
@@ -124,7 +340,6 @@ def track_control_points(
     )
 
     return tracks.squeeze(0), visibility.squeeze(0)
-
 
 # TODO: refactor this, way too much happening here
 def lift_control_points_to_3d(
