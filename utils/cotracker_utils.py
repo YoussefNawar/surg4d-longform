@@ -688,7 +688,8 @@ def lift_control_points_to_3d(
 
         # Logging for visualization
         if save_dir is not None:
-            rr.set_time_sequence("frame", t)
+            # rr.set_time_sequence("frame", t)
+            rr.set_time("frame", sequence=t)
             rr.log("world/depth_map", rr.Image(depth_maps[t].cpu()))
 
             colors = filled_colors_filtered[t].cpu().numpy()

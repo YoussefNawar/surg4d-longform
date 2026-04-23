@@ -4,7 +4,7 @@ channels = ["conda-forge", "pytorch", "nvidia"]
 name = "surgery-scene-graphs"
 platforms = ["linux-64"]
 version = "0.1.0"
-
+ 
 [activation.env]
 # LIBRARY_PATH needed for Triton to find libcuda.so at compile time
 LIBRARY_PATH = "$PIXI_PROJECT_ROOT/.pixi/envs/default/lib/stubs:$PIXI_PROJECT_ROOT/.pixi/envs/default/lib:$LIBRARY_PATH"
@@ -13,44 +13,69 @@ C_INCLUDE_PATH = "$PIXI_PROJECT_ROOT/.pixi/envs/default/include:$C_INCLUDE_PATH"
 CPATH = "$PIXI_PROJECT_ROOT/.pixi/envs/default/include:$CPATH"
 TOKENIZERS_PARALLELISM = "false"
 PYTHONNOUSERSITE = "1"
-
+ 
 [dependencies]
 python = "==3.10"
+# --- CHANGED: CUDA 12.8 -> 12.1 to match driver 535 (max CUDA 12.2) ---
 cuda-toolkit = "12.1.*"
 cuda-version = "==12.1"
 cuda-driver-dev = "12.1.*"
 libxcrypt = "*"
 uv = ">=0.1.0"
 libjpeg-turbo = ">=3.1.2,<4"
-
+numpy = "<2"
+scipy = "<1.14"
+ 
 [tasks]
 # Initialize git submodules
 init-submodules = "git submodule update --init --recursive"
-
-# PyTorch installation for CUDA 12.1
-install-pytorch = "uv pip install torch==2.3.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
-
-# vLLM installation from official PyPI
+ 
+# Clone SALAD into DA3-Streaming loop_utils (not registered as a submodule upstream)
+clone-salad = """
+if [ ! -d "submodules/depth-anything-3/da3_streaming/loop_utils/salad" ]; then
+  git clone https://github.com/serizba/salad.git submodules/depth-anything-3/da3_streaming/loop_utils/salad
+else
+  echo "SALAD already cloned, skipping."
+fi
+"""
+ 
+# --- CHANGED: PyTorch 2.9.0 cu128 -> 2.5.1 cu121 ---
+# PyTorch 2.5.1+cu121 still ships sm_61 kernels (Pascal: TITAN Xp, 1080 Ti)
+# sm_61 support was dropped in PyTorch 2.8
+install-pytorch = "uv pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121"
+ 
+# --- CHANGED: vLLM 0.15.1 -> 0.6.1.post1 ---
+# vLLM 0.6.x is the last release line built against CUDA 12.1 / PyTorch 2.5.x
+# Later versions require PyTorch 2.7+ and CUDA 12.4+
 install-vllm-deps = "uv pip install six==1.17.0 && uv pip install 'setuptools==79.0.1'"
-
-install-vllm = "uv pip install vllm==0.15.1"
-
+install-vllm = "uv pip install vllm==0.6.1.post1"
+ 
 # Install CoTracker from git (fixed commit)
 install-cotracker = "uv pip install git+https://github.com/facebookresearch/co-tracker.git@82e02e8029753ad4ef13cf06be7f4fc5facdda4d"
-
+ 
 # Install Depth Anything V3 from submodule
 install-depth-anything-3 = "cd submodules/depth-anything-3 && uv pip install -e . && cd ../.."
-
+ 
+# Install DA3-Streaming dependencies
+install-da3-streaming-deps = """
+uv pip install -r submodules/depth-anything-3/da3_streaming/requirements.txt
+"""
+ 
+# Download DA3-Streaming weights
+download-da3-weights = """
+cd submodules/depth-anything-3/da3_streaming/scripts && bash download_weights.sh
+"""
+ 
 download-cotracker-checkpoint = """
 mkdir -p checkpoints && \
 wget -O checkpoints/cotracker3_scaled_offline.pth https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth || \
 curl -L -o checkpoints/cotracker3_scaled_offline.pth https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth
 """
-
+ 
 install-sam2 = """
 cd submodules/SASVi/src/sam2 && uv pip install -e . && cd ../../../..
 """
-
+ 
 download-sam2-checkpoint = """
 mkdir -p submodules/SASVi/src/sam2/checkpoints && \
 cd submodules/SASVi/src/sam2/checkpoints && \
@@ -58,14 +83,14 @@ wget -O sam2.1_hiera_large.pt https://dl.fbaipublicfiles.com/segment_anything_2/
 curl -L -o sam2.1_hiera_large.pt https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt && \
 cd ../../../../..
 """
-
+ 
 download-cholecseg8k = """
 mkdir -p data/cholecseg8k && \
 wget -O data/cholecseg8k/cholecseg8k.zip https://www.kaggle.com/api/v1/datasets/download/newslab/cholecseg8k || \
 curl -L -o data/cholecseg8k/cholecseg8k.zip https://www.kaggle.com/api/v1/datasets/download/newslab/cholecseg8k && \
 unzip -o data/cholecseg8k/cholecseg8k.zip -d data/cholecseg8k
 """
-
+ 
 download-benchmark-annotations = """
 mkdir -p data/annotations data/.tmp && \
 wget -O data/surg4d-benchmark-main.zip https://codeload.github.com/NicoStellwag/surg4d-benchmark/zip/refs/heads/main || \
@@ -74,38 +99,67 @@ unzip -o data/surg4d-benchmark-main.zip 'surg4d-benchmark-main/annotations/*' -d
 cp -Rf data/.tmp/surg4d-benchmark-main/annotations/. data/annotations/ && \
 rm -rf data/.tmp
 """
-
+ 
 install-sds-playground = """
 cd submodules/SDS_Playground && uv pip install -e . && cd ../..
 """
-
+ 
+# --- CHANGED: transformers 4.57.1 -> 4.46.3 ---
+# transformers 4.57.1 may pull in dependencies expecting newer torch internals;
+# 4.46.x is well-tested with torch 2.5.x
 install-python-deps = """
 uv pip install \
   hydra-core==1.3.2 \
   qwen-vl-utils==0.0.14 \
   rerun-sdk==0.30.2 \
   accelerate==1.12.0 \
-  transformers==4.57.1 \
+  transformers==4.46.3 \
   notebook==7.5.3 \
   albumentations==1.3.1 \
   jpeg4py==0.1.4
 """
-
-
+ 
+# Force pip-layer packages to respect numpy<2 constraint.
+# This must run LAST because earlier uv pip installs can silently
+# upgrade numpy/scipy/scikit-learn to ABI-incompatible versions.
+fix-numpy-compat = """
+uv pip install --force-reinstall "numpy<2" "scipy<1.14" "scikit-learn<1.5"
+"""
+ 
 # Full setup - follows dependency order
-setup = { depends-on = ["init-submodules", "install-pytorch", "install-vllm-deps", "install-vllm", "install-cotracker", "install-depth-anything-3", "download-cotracker-checkpoint", "install-sam2", "download-sam2-checkpoint", "install-sds-playground", "install-python-deps"] }
-
+setup = { depends-on = [
+  "init-submodules",
+  # "clone-salad",
+  "install-pytorch",
+  "install-vllm-deps",
+  "install-vllm",
+  "install-cotracker",
+  "install-depth-anything-3",
+  "install-da3-streaming-deps",
+  "download-da3-weights",
+  "download-cotracker-checkpoint",
+  "install-sam2",
+  "download-sam2-checkpoint",
+  "install-sds-playground",
+  "install-python-deps",
+  "fix-numpy-compat",
+] }
+ 
 # Test installation
 test-install = """
 python -c "import torch; print(f'PyTorch {torch.__version__} (CUDA: {torch.cuda.is_available()})')" && \
+python -c "import torch; print(f'CUDA arch list: {torch.cuda.get_arch_list()}')" && \
 python -c "import vllm; print(f'vLLM {vllm.__version__} imported successfully')" && \
 python -c "from depth_anything_3.api import DepthAnything3; print('Depth Anything V3 imported successfully')" && \
-python -c "import cotracker; print('CoTracker imported successfully')"
+python -c "import cotracker; print('CoTracker imported successfully')" && \
+python -c "import numpy; print(f'NumPy {numpy.__version__}')" && \
+python -c "import scipy; print(f'SciPy {scipy.__version__}')" && \
+python -c "import sklearn; print(f'scikit-learn {sklearn.__version__}')"
 """
-
+ 
 # Dependency check
 check-deps = "uv pip list && python -m pip check"
-
+ 
 # Clean build artifacts
 clean = """
 find . -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
@@ -113,7 +167,7 @@ find . -type d -name '*.egg-info' -exec rm -rf {} + 2>/dev/null || true && \
 find . -type d -name 'build' -exec rm -rf {} + 2>/dev/null || true && \
 find . -type d -name 'dist' -exec rm -rf {} + 2>/dev/null || true
 """
-
+ 
 # Reset submodules to clean state
 reset-submodules = """
 git submodule foreach --recursive git clean -fdx && \
