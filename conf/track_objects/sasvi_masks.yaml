@@ -12,7 +12,7 @@ cotracker_k_neighbors: 3
 cotracker_idw_power: 2.0
 
 # ablations - settings here are top performing method
-cotracker_filter_depth_jumps: true
+cotracker_filter_depth_jumps: false
 cotracker_init_from_multiple_frames: false
 cotracker_fill_occlusions: true
 

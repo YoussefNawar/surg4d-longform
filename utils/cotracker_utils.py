@@ -60,7 +60,7 @@ def track_semantic_reappearances(frame_data, patience=5, area_threshold=10000):
         current_labels = data.get('labels', [])
         # print(current_labels)
         for mask, label in zip(current_masks, current_labels):
-            if label != 5:
+            if label != 9:
                 continue
             # Case 1: Brand new class appearance
             # mask_area = np.sum(mask)
@@ -158,7 +158,7 @@ def track_points_online(
     masks_files: list,
     save_dir: Path = None,
     checkpoint: Path = None,
-    patience: int = 5,
+    patience: int = 500,
     grid_size: int = 50,
 ):
     frames, file_names = read_video_from_dir(image_files)
@@ -198,7 +198,7 @@ def track_points_online(
     for i, frame in enumerate(tqdm(frames)):        
         # Process whenever we hit a window boundary
         if i % model.step == 0 and i != 0:
-            pred_tracks, pred_visibility = _process_step(
+            pred_tracks, pred_visibility , confidence = _process_step(
                 window_frames,
                 is_first_step,
                 grid_size=grid_size,
@@ -208,7 +208,7 @@ def track_points_online(
             is_first_step = False
 
         window_frames.append(frame)
-    pred_tracks, pred_visibility = _process_step(
+    pred_tracks, pred_visibility, confidence = _process_step(
         window_frames[-(i % model.step) - model.step - 1 :],
         is_first_step,
         grid_size=grid_size,
@@ -229,7 +229,7 @@ def track_points_online(
         query_frame=0,
         filename="video",
     )
-    return pred_tracks.squeeze(0) , pred_visibility.squeeze(0)
+    return pred_tracks.squeeze(0) , pred_visibility.squeeze(0), confidence.squeeze(0)
 
 def track_control_points(
     image_files: list,
@@ -348,7 +348,7 @@ def lift_control_points_to_3d(
     geometry_npz_path: Path,
     image_files: List[Path],
     depth_jump_threshold: float,
-    fill_occlusions: bool,
+    fill_occlusions: bool = False,
     save_dir: Path = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
