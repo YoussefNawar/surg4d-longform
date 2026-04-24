@@ -83,7 +83,7 @@ def interpolate_gaussian_positions_from_control_points(
     rr.init("cotracker_interpolation")
     rr.save(save_dir / "cotracker_interpolation.rrd")
     for t in range(T):
-        rr.set_time_sequence("frame", t)
+        rr.set_time("frame", sequence = t)
         rr.log(
             "world/sampled_gaussians",
             rr.Points3D(
