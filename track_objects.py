@@ -505,8 +505,8 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
     semantic_mask_dir = clip_dir / cfg.track_objects.semantic_mask_subdir
 
     # Output directory for CoTracker data
-    # cotracker_dir = clip_dir / cfg.track_objects.cotracker_subdir
-    cotracker_dir = Path('cotracker_dir')
+    cotracker_dir = clip_dir / cfg.track_objects.cotracker_subdir
+    # cotracker_dir = Path('cotracker_dir')
     # os.makedirs(cotracker_dir, exist_ok = True)
     # cotracker_dir.mkdir(parents=True, exist_ok=True)
 
@@ -549,14 +549,22 @@ def track_objects(clip: DictConfig, cfg: DictConfig):
     #     save_dir=cotracker_dir,
     # )
     # print(image_files)
-    control_points_2d, visibility = track_points_online(
+    control_points_2d, visibility, confidence = track_points_online(
         image_files,
         semantic_mask_dir,
         cotracker_dir,
+
     )
+    np.savez(cotracker_dir / 'control_points_2d.npz' , control_points_2d.cpu())
+    np.savez(cotracker_dir / 'visibility.npz' , visibility.cpu())
+    np.savez(cotracker_dir / 'confidence.npz' , confidence.cpu())
+    # print(np.load(cotracker_dir / 'control_points_2d.npz').arr_0)
+    # control_points_2d = torch.tensor(np.load(cotracker_dir / 'control_points_2d.npz')['arr_0']).to('cuda:0')
+    # visibility = torch.tensor(np.load(cotracker_dir / 'visibility.npz')["arr_0"]).to('cuda:0')
+
     # shape of control points: (T, N_total, 2) where N_total = n_points_per_frame * 3
     # shape of visibility: (T, N_grid), those are boolean values!
-    print(control_points_2d.shape, visibility.shape)
+    # print(control_points_2d.shape, visibility.shape)
     # Lift control points to 3D using DA3 depth and camera parameters
     logger.info("Lifting control points to 3D...")
     depth_jump_threshold = (
