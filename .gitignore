@@ -16,3 +16,4 @@ benchmark/results/
 labeling/clips/
 start.sh
 slurm_logs/
+cotracker_dir/
