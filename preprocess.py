@@ -86,6 +86,33 @@ def estimate_crop_box(class_ids: np.ndarray):
     return top, bottom, left, right
 
 
+def estimate_crop_box_rgb(rgb: np.ndarray, black_threshold: int = 10) -> tuple[int, int, int, int]:
+    """Get crop box from RGB image by detecting black circular camera borders.
+
+    This is an alternative to estimate_crop_box that works directly on RGB frames
+    without requiring semantic masks.
+
+    Args:
+        rgb: HxWx3 uint8 RGB array
+        black_threshold: pixels with all channels below this are considered black
+
+    Returns:
+        top, bottom, left, right crop indices
+    """
+    is_content = np.any(rgb > black_threshold, axis=2)
+
+    mid_col = is_content[:, is_content.shape[1] // 2]
+    top = int(mid_col.argmax())
+    bottom = int(mid_col.size - np.flip(mid_col).argmax())
+
+    is_content_cropped = is_content[top:bottom, :]
+    first_row = is_content_cropped[0]
+    left = int(first_row.argmax())
+    right = int(first_row.size - np.flip(first_row).argmax())
+
+    return top, bottom, left, right
+
+
 def _compute_center_crop_offsets(height: int, width: int, k: int) -> tuple[int, int]:
     """Compute top/left offsets removed by center_crop_divisible given H, W, k."""
     new_h = (height // k) * k
@@ -239,12 +266,23 @@ def preprocess(clip: DictConfig, cfg: DictConfig):
         frame_stride=clip.frame_stride,
     )
 
-    # estimate crops to remove black borders from first GT semantic mask
-    first_class_ids = seg8k_endo_watershed_to_class_ids(
-        Image.open(semantic_mask_files[0])
-    )
+    # Estimate crop box to remove black camera borders
+    crop_method = cfg.preprocess.get("crop_method", "semantic_mask")
 
-    top, bottom, left, right = estimate_crop_box(first_class_ids)
+    if crop_method == "none":
+        # Frames are already cropped, no additional cropping needed
+        first_rgb = np.asarray(Image.open(frame_files[0]))
+        top, bottom, left, right = 0, first_rgb.shape[0], 0, first_rgb.shape[1]
+    elif crop_method == "rgb":
+        # Use RGB-based detection (no semantic masks required)
+        first_rgb = np.asarray(Image.open(frame_files[0]))
+        top, bottom, left, right = estimate_crop_box_rgb(first_rgb)
+    else:
+        # Default: use semantic mask (original behavior)
+        first_class_ids = seg8k_endo_watershed_to_class_ids(
+            Image.open(semantic_mask_files[0])
+        )
+        top, bottom, left, right = estimate_crop_box(first_class_ids)
 
     # translate spatial labels to new coordinates
     translated_labels, viz_points = _load_and_translate_spatial_labels(

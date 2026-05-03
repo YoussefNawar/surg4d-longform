@@ -27,7 +27,7 @@ def get_clip_seg8k(
     if not vid_dir.exists():
         raise FileNotFoundError(f"Video directory not found: {vid_dir}")
 
-    clip_dir = vid_dir / f"video{seg8k_video_id:02d}_{first_frame:05d}"
+    clip_dir = vid_dir / f'video{seg8k_video_id:02d}_00000' # f"video{seg8k_video_id:02d}_{first_frame:05d}"  
     if not clip_dir.exists():
         raise FileNotFoundError(f"Clip directory not found: {clip_dir}")
 

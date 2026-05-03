@@ -1,6 +1,8 @@
 semantic_mask_source: sasvi
 predicted_semantic_mask_subdir: ${segment.prediction_subdir}
 
+crop_method: default    # ADD THIS LINE - skip black border cropping
+
 semantic_mask_subdir: semantic_masks_sasvi
 instance_mask_subdir: instance_masks_sasvi
 overlay_subdir: overlayed_images_sasvi

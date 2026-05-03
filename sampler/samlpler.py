@@ -7,12 +7,36 @@ Usage:
     python sample_cholec80.py --video /path/to/video01.mp4 --output /path/to/output_dir --step 5
 """
 
-import os
 import cv2
+import numpy as np
 from pathlib import Path
 
 
-def sample_video(video_path: str, output_dir: str, step: int = 5) -> None:
+def estimate_crop_box_rgb(rgb: np.ndarray, black_threshold: int = 10) -> tuple[int, int, int, int]:
+    """Get crop box from RGB image by detecting black circular camera borders.
+
+    Args:
+        rgb: HxWx3 uint8 RGB array
+        black_threshold: pixels with all channels below this are considered black
+
+    Returns:
+        top, bottom, left, right crop indices
+    """
+    is_content = np.any(rgb > black_threshold, axis=2)
+
+    mid_col = is_content[:, is_content.shape[1] // 2]
+    top = int(mid_col.argmax())
+    bottom = int(mid_col.size - np.flip(mid_col).argmax())
+
+    is_content_cropped = is_content[top:bottom, :]
+    first_row = is_content_cropped[0]
+    left = int(first_row.argmax())
+    right = int(first_row.size - np.flip(first_row).argmax())
+
+    return top, bottom, left, right
+
+
+def sample_video(video_path: str, output_dir: str, step: int = 5, crop: bool = True) -> None:
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -30,6 +54,17 @@ def sample_video(video_path: str, output_dir: str, step: int = 5) -> None:
     print(f"Total frames: {total_frames}, FPS: {fps:.2f}, Resolution: {width}x{height}")
     print(f"Sampling every {step} frames (frames 1, {1+step}, {1+2*step}, ...)")
 
+    crop_box = None
+    if crop:
+        ret, first_frame = cap.read()
+        if not ret:
+            raise RuntimeError("Cannot read first frame for crop estimation")
+        crop_box = estimate_crop_box_rgb(first_frame)
+        top, bottom, left, right = crop_box
+        print(f"Crop box: top={top}, bottom={bottom}, left={left}, right={right}")
+        print(f"Cropped resolution: {right - left}x{bottom - top}")
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
     sampled = 0
     frame_idx = 0
 
@@ -39,7 +74,10 @@ def sample_video(video_path: str, output_dir: str, step: int = 5) -> None:
             break
 
         if frame_idx % step == 0:
-            # 1-indexed naming: frame 0 -> frame_00001, frame 5 -> frame_00006, etc.
+            if crop_box is not None:
+                top, bottom, left, right = crop_box
+                frame = frame[top:bottom, left:right]
+
             frame_number = frame_idx + 1
             filename = f"frame_{frame_number:06d}.png"
             cv2.imwrite(str(output_dir / filename), frame)
@@ -56,6 +94,6 @@ def sample_video(video_path: str, output_dir: str, step: int = 5) -> None:
 
 if __name__ == "__main__":
     video = '/home/data/cholec80/videos/video01.mp4'
-    output = '/home/data/long_form_surgery_Cholec80/5fps_samples'
+    output = '/home/data/long_form_surgery_Cholec80/5fps_samples' 
     step = 5
     sample_video(video, output, step)

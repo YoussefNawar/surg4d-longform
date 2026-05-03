@@ -40,7 +40,7 @@ def read_video_from_dir(dir_path):
     frames = [np.array(Image.open(f)) for f in file_names]
     return np.stack(frames), file_names
 
-def track_semantic_reappearances(frame_data, patience=5, area_threshold=10000):
+def track_semantic_reappearances(frame_data, patience=2, area_threshold=10000):
     """
     Records only the first appearance or reappearance of a class 
     after a 'patience' period of absence.
@@ -60,13 +60,13 @@ def track_semantic_reappearances(frame_data, patience=5, area_threshold=10000):
         current_labels = data.get('labels', [])
         # print(current_labels)
         for mask, label in zip(current_masks, current_labels):
-            if label != 9:
-                continue
-            # Case 1: Brand new class appearance
-            # mask_area = np.sum(mask)
-            
-            # if mask_area < area_threshold:
+            # if label != 9:
             #     continue
+            # Case 1: Brand new class appearance
+            mask_area = np.sum(mask)
+            
+            if mask_area < area_threshold:
+                continue
             if label not in last_seen_registry:
                 tracked_output.append((mask, label, frame_idx))
                 last_seen_registry[label] = frame_idx
@@ -158,7 +158,7 @@ def track_points_online(
     masks_files: list,
     save_dir: Path = None,
     checkpoint: Path = None,
-    patience: int = 500,
+    patience: int = 10,
     grid_size: int = 50,
 ):
     frames, file_names = read_video_from_dir(image_files)
@@ -180,7 +180,7 @@ def track_points_online(
             .float()
             .permute(0, 3, 1, 2)[None].to('cuda')
         ) 
-        return model(
+        result = model(
             video_chunk,
             queries=queries,
             is_first_step=is_first_step,
@@ -188,6 +188,16 @@ def track_points_online(
             grid_query_frame=grid_query_frame,
             add_support_grid=False
         )
+        # CoTracker3 returns (tracks, visibility)
+        pred_tracks, pred_visibility = result
+        
+        # First step returns (None, None) for initialization - pass through
+        if pred_tracks is None:
+            return None, None, None
+        
+        # Normal case: create dummy confidence tensor
+        confidence = torch.ones_like(pred_visibility, dtype=torch.float32)
+        return pred_tracks, pred_visibility, confidence
 
     # Iterating over video frames
     window_frames = []
@@ -198,13 +208,15 @@ def track_points_online(
     for i, frame in enumerate(tqdm(frames)):        
         # Process whenever we hit a window boundary
         if i % model.step == 0 and i != 0:
-            pred_tracks, pred_visibility , confidence = _process_step(
+            pred_tracks, pred_visibility, confidence = _process_step(
                 window_frames,
                 is_first_step,
                 grid_size=grid_size,
                 grid_query_frame=0,
-                queries = queries[None] if is_first_step else None
+                queries=queries[None] if is_first_step else None
             )
+            # Always set False after first call - CoTracker initializes on first call
+            # and returns (None, None), then processes on subsequent calls
             is_first_step = False
 
         window_frames.append(frame)
